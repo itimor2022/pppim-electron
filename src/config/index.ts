@@ -26,7 +26,7 @@ export const getWsUrl = () => localStorage.getItem("wsUrl") || WS_URL;
 export const getApiUrl = () => localStorage.getItem("apiUrl") || API_URL;
 export const getChatUrl = () => localStorage.getItem("chatUrl") || CHAT_URL;
 
-export const APP_VERSION = "享聊 v1.0";
+export const APP_VERSION = "享聊 1.0.0";
 export const APP_VERSION_CODE = 550;
 export const SDK_VERSION = "SDK v1.0.1";
 export const CHECK_UPDATE_PREFIX =

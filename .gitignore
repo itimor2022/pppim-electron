@@ -25,6 +25,7 @@ public/emojiAssets
 *.njsproj
 *.sln
 *.sw?
+*.zip
 
 #lockfile
 package-lock.json

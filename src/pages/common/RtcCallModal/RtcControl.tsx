@@ -188,7 +188,8 @@ export const RtcControl = ({
     })
       .then(({ data }) => connectRtc(data))
       .catch((error) => {
-        feedbackToast({ msg: t("toast.byInviteUserFailed"), error });
+        console.error("RTC2 invite error:", error);
+        // feedbackToast({ msg: t("toast.byInviteUserFailed"), error });
         closeOverlay();
       });
   };
