@@ -3,7 +3,7 @@
  */
 {
   appId: "YourAppID",
-  asar: true,
+  asar: false,
   directories: {
     output: "release/${version}",
   },
@@ -11,6 +11,7 @@
   mac: {
     artifactName: "${productName}_${version}.${ext}",
     target: ["dmg"],
+    identity: null,
   },
   win: {
     target: [
@@ -20,6 +21,7 @@
       },
     ],
     artifactName: "${productName}_${version}.${ext}",
+    signingHashAlgorithms: null,
   },
   nsis: {
     oneClick: false,

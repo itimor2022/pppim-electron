@@ -6,7 +6,7 @@ import login_bg from "@/assets/images/login/login_bg.png";
 import WindowControlBar from "@/components/WindowControlBar";
 import { APP_VERSION, SDK_VERSION } from "@/config";
 import { feedbackToast } from "@/utils/common";
-import { setLoginMethod as saveLoginMethod } from "@/utils/storage";
+import { getLoginMethod, setLoginMethod as saveLoginMethod } from "@/utils/storage";
 
 import ConfigModal from "./ConfigModal";
 import styles from "./index.module.scss";
@@ -19,15 +19,13 @@ export type FormType = 0 | 1 | 2;
 export const Login = () => {
   // 0login 1resetPassword 2register
   const [formType, setFormType] = useState<FormType>(0);
-  // 默认使用手机号登录
-  const [loginMethod, setLoginMethod] = useState<"phone" | "email">("phone");
+  const [loginMethod, setLoginMethod] = useState<"phone" | "email">(getLoginMethod());
 
   const [_, copyToClipboard] = useCopyToClipboard();
 
   const updateLoginMethod = useCallback((method: "phone" | "email") => {
-    // 固定为手机号登录，同时保持存储一致
-    setLoginMethod("phone");
-    saveLoginMethod("phone");
+    setLoginMethod(method);
+    saveLoginMethod(method);
   }, []);
 
   const handleCopy = () => {

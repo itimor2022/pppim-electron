@@ -15,7 +15,7 @@ import { Virtuoso } from "react-virtuoso";
 
 import OIMAvatar from "@/components/OIMAvatar";
 import { IMSDK } from "@/layout/MainContentWrap";
-import { useConversationStore } from "@/store";
+import { useConversationStore, useUserStore } from "@/store";
 
 import { IMessageItemProps } from ".";
 
@@ -24,6 +24,14 @@ const MessageReadState: FC<IMessageItemProps> = ({ message }) => {
   const [showReadList, setShowReadList] = useState(false);
   const isSingle = message.sessionType === SessionType.Single;
   const unReadCount = message.attachedInfoElem?.groupHasReadInfo.unreadCount ?? 0;
+  const showMessageReadStatus = useUserStore(
+    (state) => Number(state.appConfig.showMessageReadStatus ?? 1) === 1,
+  );
+  const closeOverlay = useCallback(() => setShowReadList(false), []);
+
+  if (!showMessageReadStatus) {
+    return null;
+  }
 
   const getReadStateStr = () => {
     if (isSingle) {
@@ -34,9 +42,6 @@ const MessageReadState: FC<IMessageItemProps> = ({ message }) => {
       ? t("placeholder.allIsRead")
       : t("placeholder.unreadNum", { num: unReadCount });
   };
-
-  const closeOverlay = useCallback(() => setShowReadList(false), []);
-
   return (
     <Popover
       content={

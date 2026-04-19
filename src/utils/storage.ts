@@ -19,11 +19,12 @@ export const setPhoneNumber = (account: string) =>
 export const setEmail = (email: string) => localStorage.setItem("IM_EMAIL", email);
 export const setLoginMethod = (method: string) =>
   localStorage.setItem("IM_LOGIN_METHOD", method);
-export const setTMToken = (token: string) => localForage.setItem("IM_TOKEN", token);
-export const setChatToken = (token: string) =>
-  localForage.setItem("IM_CHAT_TOKEN", token);
-export const setTMUserID = (userID: string) => localForage.setItem("IM_USERID", userID);
-export const setIMProfile = ({
+export const setTMToken = async (token: string) => await localForage.setItem("IM_TOKEN", token);
+export const setChatToken = async (token: string) =>
+  await localForage.setItem("IM_CHAT_TOKEN", token);
+export const setTMUserID = async (userID: string) =>
+  await localForage.setItem("IM_USERID", userID);
+export const setIMProfile = async ({
   chatToken,
   imToken,
   userID,
@@ -32,25 +33,9 @@ export const setIMProfile = ({
   imToken: string;
   userID: string;
 }) => {
-  console.log("💾 [Storage] setIMProfile 开始保存用户信息", {
-    userID,
-    hasChatToken: !!chatToken,
-    hasImToken: !!imToken,
-    chatTokenLength: chatToken?.length,
-    imTokenLength: imToken?.length,
-    timestamp: new Date().toISOString()
-  });
-
-  setTMToken(imToken);
-  console.log("💾 [Storage] imToken 已保存");
-
-  setChatToken(chatToken);
-  console.log("💾 [Storage] chatToken 已保存");
-
-  setTMUserID(userID);
-  console.log("💾 [Storage] userID 已保存");
-
-  console.log("✅ [Storage] setIMProfile 完成");
+  await setTMToken(imToken);
+  await setChatToken(chatToken);
+  await setTMUserID(userID);
 };
 
 export const setAccessedFriendApplication = async (list: string[]) =>
@@ -64,21 +49,10 @@ export const setLocale = (locale: string) => localStorage.setItem("IM_LOCALE", l
 export const setImageCache = async (caches: Record<string, string>) =>
   localForage.setItem(`imageCache`, caches);
 
-export const clearIMProfile = () => {
-  console.log("🗑️ [Storage] clearIMProfile 开始清除用户数据", {
-    timestamp: new Date().toISOString()
-  });
-
-  localForage.removeItem("IM_TOKEN");
-  console.log("🗑️ [Storage] IM_TOKEN 已清除");
-
-  localForage.removeItem("IM_CHAT_TOKEN");
-  console.log("🗑️ [Storage] IM_CHAT_TOKEN 已清除");
-
-  localForage.removeItem("IM_USERID");
-  console.log("🗑️ [Storage] IM_USERID 已清除");
-
-  console.log("✅ [Storage] clearIMProfile 完成");
+export const clearIMProfile = async () => {
+  await localForage.removeItem("IM_TOKEN");
+  await localForage.removeItem("IM_CHAT_TOKEN");
+  await localForage.removeItem("IM_USERID");
 };
 
 export const getAreaCode = () => localStorage.getItem("IM_AREA_CODE");

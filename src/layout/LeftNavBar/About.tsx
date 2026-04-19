@@ -3,7 +3,7 @@ import { Divider, Form, Modal, Spin } from "antd";
 import { t } from "i18next";
 import { forwardRef, ForwardRefRenderFunction, memo, useState } from "react";
 
-import logo from "@/assets/images/profile/new_openim_logo.png";
+import logo from "@/assets/images/profile/logo.png";
 import { APP_VERSION, SDK_VERSION } from "@/config";
 import { logReport } from "@/routes/GlobalErrorElement";
 

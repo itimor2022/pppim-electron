@@ -46,12 +46,24 @@ export const useUserStore = create<UserStore>()((set, get) => ({
     let config = {} as AppConfig;
     try {
       const { data } = await getAppConfig();
-      config = (data.config ?? {}) as AppConfig;
+      config = data.config ?? {};
       if (!config.allowSendMsgNotFriend) {
         config.allowSendMsgNotFriend = BusinessAllowType.Allow;
       }
       if (!config.needInvitationCodeRegister) {
         config.needInvitationCodeRegister = BusinessAllowType.Allow;
+      }
+      if (config.showMessageReadStatus === undefined) {
+        config.showMessageReadStatus = 1;
+      }
+      if (config.showOnlinePlatform === undefined) {
+        config.showOnlinePlatform = 0;
+      }
+      if (config.showUserOnlineStatus === undefined) {
+        config.showUserOnlineStatus = 1;
+      }
+      if (config.showGroupAllMembers === undefined) {
+        config.showGroupAllMembers = 1;
       }
     } catch (error) {
       console.error("get app config err");
@@ -65,28 +77,13 @@ export const useUserStore = create<UserStore>()((set, get) => ({
     set((state) => ({ appSettings: { ...state.appSettings, ...settings } }));
   },
   userLogout: async (force?: boolean) => {
-    console.log("🚪 [UserStore] 开始用户退出登录", {
-      force,
-      timestamp: new Date().toISOString()
-    });
-
-    if (!force) {
-      console.log("🔄 [UserStore] 调用IMSDK.logout()");
-      await IMSDK.logout();
-    } else {
-      console.log("⚠️ [UserStore] 强制退出，跳过IMSDK.logout()");
-    }
-
-    console.log("🗑️ [UserStore] 清除用户数据");
+    if (!force) await IMSDK.logout();
     clearIMProfile();
     set({ selfInfo: {} as BusinessUserInfo });
     useContactStore.getState().clearContactStore();
     useConversationStore.getState().clearConversationStore();
     window.electronAPI?.ipcInvoke("updateUnreadCount", 0);
-
-    console.log("🔄 [UserStore] 跳转到登录页");
     router.navigate("/login");
-    console.log("✅ [UserStore] 用户退出登录完成");
   },
   getWorkMomentsUnreadCount: async () => {
     try {

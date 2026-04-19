@@ -13,6 +13,9 @@ export default function useConversationState() {
   const isMutedGroup = useConversationStore(
     (state) => state.currentGroupInfo?.status === GroupStatus.Muted,
   );
+  const currentMemberInGroupLoading = useConversationStore(
+    (state) => state.currentMemberInGroupLoading,
+  );
 
   const { isJoinGroup, isNomal, currentIsMuted } = useCurrentMemberRole();
 
@@ -49,6 +52,10 @@ export default function useConversationState() {
       return true;
     }
 
+    if (currentMemberInGroupLoading) {
+      return false;
+    }
+
     if (!isJoinGroup) {
       return false;
     }
@@ -60,5 +67,11 @@ export default function useConversationState() {
     return !currentIsMuted;
   };
 
-  return { getIsCanSendMessage, currentIsMuted, isMutedGroup, currentConversation };
+  return {
+    getIsCanSendMessage,
+    currentIsMuted,
+    isMutedGroup,
+    currentConversation,
+    currentMemberInGroupLoading,
+  };
 }

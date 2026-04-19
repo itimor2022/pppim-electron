@@ -43,8 +43,13 @@ export const QueryChat = () => {
     manual: true,
   });
 
-  const { getIsCanSendMessage, isMutedGroup, currentIsMuted, currentConversation } =
-    useConversationState();
+  const {
+    getIsCanSendMessage,
+    isMutedGroup,
+    currentIsMuted,
+    currentConversation,
+    currentMemberInGroupLoading,
+  } = useConversationState();
   useMessageReceipt();
 
   const isNotificationSession =
@@ -87,6 +92,7 @@ export const QueryChat = () => {
     }
     if (!getIsCanSendMessage()) {
       let tip = t("toast.notCanSendMessage");
+      if (currentMemberInGroupLoading) tip = t("toast.groupMemberSyncing");
       if (isMutedGroup) tip = t("toast.groupMuted");
       if (currentIsMuted) tip = t("toast.currentMuted");
 

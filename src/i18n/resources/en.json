@@ -63,6 +63,7 @@
     "confirmlogOut": "Are you sure you want to log out of the current account?",
     "updateAvatarFailed": "Failed to change avatar!",
     "notCanSendMessage": "Cannot send messages in a group chat that you have quit!",
+    "groupMemberSyncing": "Syncing group member status...",
     "groupMuted": "The administrator or group owner has muted everyone!",
     "currentMuted": "You have been muted by the administrator or group owner!",
     "messagesDeleteFailed": "Some messages failed to delete!",
@@ -114,8 +115,7 @@
     "getLogFailed": "Failed to retrieve the log file!",
     "publishFailed": "Failed to publish!",
     "notCanAddFriend": "The other party has been set up not to be added as a friend!",
-    "isJoinCalling": "The group call is in progress. Do you want to join it directly?",
-    "featureNotAvailable": "This feature is not yet available"
+    "isJoinCalling": "The group call is in progress. Do you want to join it directly?"
   },
   "placeholder": {
     "leaveMessage": "Leave a message",
@@ -183,8 +183,8 @@
     "verifyValidity": "6-digit verification code, valid for 10 minutes",
     "sendVerifyCode": "Send verification code",
     "qrCodeLogin": "QR code login",
-    "qrCodeLoginTitle": "Please scan the QR code using 享聊 mobile",
-    "welcome": "Welcome to 享聊",
+    "qrCodeLoginTitle": "Please scan the QR code using OpenIM mobile",
+    "welcome": "Welcome to OpenIM",
     "title": "Online office collaboration",
     "subTitle": "Collaborative work for efficient office tasks",
     "myCreated": "I created",

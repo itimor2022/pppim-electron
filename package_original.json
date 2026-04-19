@@ -1,8 +1,8 @@
 {
-  "name": "享聊",
+  "name": "光联",
   "version": "1.0.0",
   "main": "dist-electron/main/index.js",
-  "description": "享聊 PC 客户端.",
+  "description": "光联 PC 客户端.",
   "author": "blooming",
   "private": true,
   "debug": {

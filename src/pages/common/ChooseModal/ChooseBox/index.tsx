@@ -102,12 +102,11 @@ const ChooseBox: ForwardRefRenderFunction<ChooseBoxHandle, IChooseBoxProps> = (
 
   const checkClick = useCallback(
     (data: CheckListItem) => {
-      const idx =
-        latestCheckedList.current?.findIndex(
-          (item) =>
-            (item.userID && item.userID === data.userID) ||
-            (item.groupID && item.groupID === data.groupID && !showGroupMember),
-        ) ?? -1;
+      const idx = latestCheckedList.current.findIndex(
+        (item) =>
+          (item.userID && item.userID === data.userID) ||
+          (item.groupID && item.groupID === data.groupID && !showGroupMember),
+      );
       if (idx > -1) {
         setCheckedList((state) => {
           const newState = [...state];
@@ -115,7 +114,7 @@ const ChooseBox: ForwardRefRenderFunction<ChooseBoxHandle, IChooseBoxProps> = (
           return newState;
         });
       } else {
-        if (chooseOneOnly && (latestCheckedList.current?.length ?? 0) > 0) {
+        if (chooseOneOnly && latestCheckedList.current.length > 0) {
           feedbackToast({
             msg: t("toast.beyondSelectionLimit"),
             error: t("toast.beyondSelectionLimit"),

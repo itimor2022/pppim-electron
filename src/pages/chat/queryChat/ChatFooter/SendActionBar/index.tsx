@@ -74,14 +74,14 @@ const sendActionList = [
     comp: null,
     placement: undefined,
   },
-  // {
-  //   title: t("placeholder.call"),
-  //   icon: rtc,
-  //   key: "rtc",
-  //   accept: undefined,
-  //   comp: <CallPopContent />,
-  //   placement: "top",
-  // },
+  {
+    title: t("placeholder.call"),
+    icon: rtc,
+    key: "rtc",
+    accept: undefined,
+    comp: <CallPopContent />,
+    placement: "top",
+  },
 ];
 
 i18n.on("languageChanged", () => {

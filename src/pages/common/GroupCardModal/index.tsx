@@ -15,8 +15,10 @@ import { useConversationToggle } from "@/hooks/useConversationToggle";
 import useGroupMembers from "@/hooks/useGroupMembers";
 import { OverlayVisibleHandle, useOverlayVisible } from "@/hooks/useOverlayVisible";
 import { IMSDK } from "@/layout/MainContentWrap";
+import { useUserStore } from "@/store";
 import { getDefaultAvatar } from "@/utils/avatar";
 import { feedbackToast } from "@/utils/common";
+import { getDisplayMemberCount } from "@/utils/group";
 
 interface IGroupCardModalProps {
   groupData?: GroupItem;
@@ -35,6 +37,9 @@ const GroupCardModal: ForwardRefRenderFunction<
 
   const { toSpecifiedConversation } = useConversationToggle();
   const { isOverlayOpen, closeOverlay } = useOverlayVisible(ref);
+  const showGroupAllMembers = useUserStore(
+    (state) => Number(state.appConfig.showGroupAllMembers ?? 1) === 1,
+  );
 
   const { runAsync, loading } = useRequest(IMSDK.joinGroup, {
     manual: true,
@@ -48,10 +53,19 @@ const GroupCardModal: ForwardRefRenderFunction<
 
   const createTimeStr = dayjs(groupData?.createTime ?? 0).format("YYYY/M/D");
   const inThisGroup = fetchState.groupMemberList.length > 0;
+  const displayMemberCount = getDisplayMemberCount(
+    groupData?.memberCount,
+    groupData?.ex,
+  );
 
   const sliceNum = groupData?.memberCount === 8 ? 8 : 7;
+  const filteredMembers = showGroupAllMembers
+    ? fetchState.groupMemberList
+    : fetchState.groupMemberList.filter(
+        (member) => member.roleLevel === 100 || member.roleLevel === 60,
+      );
   const renderList = inThisGroup
-    ? fetchState.groupMemberList.slice(0, sliceNum)
+    ? filteredMembers.slice(0, sliceNum)
     : new Array(sliceNum).fill(1).map((_, idx) => ({
         userID: idx,
         nickname: "",
@@ -169,7 +183,7 @@ const GroupCardModal: ForwardRefRenderFunction<
           <div className="bg-[#F2F8FF] p-5.5">
             {inThisGroup && (
               <div className="mb-3">{`${t("placeholder.groupMember")}：${
-                groupData?.memberCount
+                showGroupAllMembers ? displayMemberCount : filteredMembers.length
               }`}</div>
             )}
             <div className="flex items-center">

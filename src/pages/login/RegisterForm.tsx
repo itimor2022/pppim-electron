@@ -105,13 +105,23 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
 
   const onFinish = (fields: FormFields) => {
     if (registerForm === 0) {
-      // 校验11位手机号
-      const pattern = /^\d{11}$/;
+      const pattern = /^1\d{10}$/;
       if (fields.phoneNumber && !pattern.test(fields.phoneNumber)) {
-        return message.error("请输入11位手机号");
+        return message.error(t("toast.inputCorrectPhoneNumber"));
       }
-      // 跳过验证码发送，直接进入下一步
-      setRegisterForm(2);
+      sendSms(
+        {
+          usedFor: 1,
+          ...fields,
+        },
+        {
+          onSuccess() {
+            setCountdown(60);
+            setRegisterForm(1);
+            setTimeout(() => inputRefs.current[0].focus());
+          },
+        },
+      );
     }
     const verifyCode = code.join("");
 
@@ -131,11 +141,6 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
       );
     }
     if (registerForm === 2) {
-      // 校验邀请码
-      if (fields.invitationCode !== "888888") {
-        return message.error("邀请码错误");
-      }
-
       setAreaCode(fields.areaCode);
       if (fields.phoneNumber) {
         setPhoneNumber(fields.phoneNumber);
@@ -146,8 +151,7 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
 
       register(
         {
-          verifyCode: "666666", // 使用默认验证码
-          invitationCode: fields.invitationCode, // 添加邀请码
+          verifyCode,
           autoLogin: true,
           user: {
             nickname: fields.nickname,
@@ -228,23 +232,16 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
         initialValues={{ areaCode: "+86" }}
       >
         {loginMethod === "phone" ? (
-          <>
-            {/* 隐藏区号字段，默认+86，保持底层逻辑不变 */}
-            <Form.Item name="areaCode" initialValue={"+86"} hidden>
-              <Input />
-            </Form.Item>
-            <Form.Item 
-              label={"账号"} 
-              name="phoneNumber"
-              hidden={registerForm !== 0}
-              rules={[
-                { required: true, message: "请输入账号" },
-                { pattern: /^\d{11}$/, message: "请输入11位手机号" },
-              ]}
-            >
-              <Input allowClear placeholder={"请输入11位手机号"} maxLength={11} />
-            </Form.Item>
-          </>
+          <Form.Item label={t("placeholder.phoneNumber")} hidden={registerForm !== 0}>
+            <Space.Compact className="w-full">
+              <Form.Item name="areaCode" noStyle>
+                <Select options={areaCode} className="!w-28" />
+              </Form.Item>
+              <Form.Item name="phoneNumber" noStyle>
+                <Input allowClear placeholder={t("toast.inputPhoneNumber")} />
+              </Form.Item>
+            </Space.Compact>
+          </Form.Item>
         ) : (
           <Form.Item
             label={t("placeholder.email")}
@@ -329,8 +326,8 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
               rules={[
                 {
                   required: true,
-                  pattern: /^.{6,}$/,
-                  message: "密码至少需要6位字符",
+                  pattern: /^(?=.*[0-9])(?=.*[a-zA-Z]).{6,20}$/,
+                  message: t("toast.passwordRules"),
                 },
               ]}
             >

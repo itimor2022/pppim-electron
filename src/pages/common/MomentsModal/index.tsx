@@ -199,18 +199,18 @@ const MomentsModalNew: ForwardRefRenderFunction<OverlayVisibleHandle> = (_, ref)
                 </>
               ),
               Footer: () =>
-                isFetching ? (
+                isFetching && (
                   <div className="mt-[20%] flex justify-center">
                     <Spin />
                   </div>
-                ) : null,
+                ),
               EmptyPlaceholder: () =>
-                !isFetching ? (
+                !isFetching && (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
                     description={t("empty.noMoments")}
                   />
-                ) : null,
+                ),
             }}
             itemContent={(_, moments) => (
               <MomentsItemRender

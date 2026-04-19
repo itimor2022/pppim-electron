@@ -2,7 +2,7 @@ import { Layout, Tooltip } from "antd";
 import clsx from "clsx";
 import i18n, { t } from "i18next";
 import { CbEvents } from "open-im-sdk-wasm";
-import { GroupAtType, OnlineState, Platform, SessionType } from "open-im-sdk-wasm";
+import { GroupAtType, OnlineState, SessionType } from "open-im-sdk-wasm";
 import { UserOnlineState, WSEvent } from "open-im-sdk-wasm/lib/types/entity";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
@@ -16,6 +16,7 @@ import { OverlayVisibleHandle } from "@/hooks/useOverlayVisible";
 import { IMSDK } from "@/layout/MainContentWrap";
 import { useConversationStore, useUserStore } from "@/store";
 import emitter from "@/utils/events";
+import { getDisplayMemberCount } from "@/utils/group";
 import { isGroupSession } from "@/utils/imCommon";
 
 import GroupAnnouncementDrawer from "../GroupAnnouncementDrawer";
@@ -171,7 +172,12 @@ const ChatHeader = () => {
             {!isSingle && !isNotification && (
               <div className="flex items-center text-xs text-[var(--sub-text)]">
                 <img width={20} src={group_member} alt="member" />
-                <span>{currentGroupInfo?.memberCount}</span>
+                <span>
+                  {getDisplayMemberCount(
+                    currentGroupInfo?.memberCount,
+                    currentGroupInfo?.ex,
+                  )}
+                </span>
               </div>
             )}
           </div>
@@ -227,6 +233,12 @@ const OnlineOrTypingStatus = ({ userID }: { userID: string }) => {
   const [typing, setTyping] = useState(false);
   const [onlineState, setOnlineState] = useState<UserOnlineState>();
   const timer = useRef<NodeJS.Timeout | null>(null);
+  const showUserOnlineStatus = useUserStore(
+    (state) => Number(state.appConfig.showUserOnlineStatus ?? 1) === 1,
+  );
+  const showOnlinePlatform = useUserStore(
+    (state) => Number(state.appConfig.showOnlinePlatform ?? 0) === 1,
+  );
 
   useEffect(() => {
     const userStatusChangeHandler = ({ data }: WSEvent<UserOnlineState>) => {
@@ -272,39 +284,53 @@ const OnlineOrTypingStatus = ({ userID }: { userID: string }) => {
         </p>
       ) : (
         <>
-          <i
-            className={clsx(
-              "mr-1.5 inline-block h-[6px] w-[6px] rounded-full bg-[#2ddd73]",
-              {
-                "bg-[#999]": onlineState?.status === OnlineState.Offline,
-              },
-            )}
-          />
-          <span className="text-xs text-[var(--sub-text)]">
-            {platformToDetails(onlineState)}
-          </span>
+          {showUserOnlineStatus && (
+            <>
+              <i
+                className={clsx(
+                  "mr-1.5 inline-block h-[6px] w-[6px] rounded-full bg-[#2ddd73]",
+                  {
+                    "bg-[#999]": onlineState?.status === OnlineState.Offline,
+                  },
+                )}
+              />
+              <span className="text-xs text-[var(--sub-text)]">
+                {onlineState?.status === OnlineState.Offline
+                  ? t("placeholder.offLine")
+                  : showOnlinePlatform
+                  ? platformToDetails(onlineState)
+                  : t("placeholder.online")}
+              </span>
+            </>
+          )}
         </>
       )}
     </div>
   );
 };
 
-const platformMap: Record<Platform, string> = {
+const platformMap = {
   1: "iOS",
   2: "Android",
   3: "Windows",
   4: "MacOSX",
   5: "Web",
-  // @ts-ignore
   6: "MiniProgram",
   7: "Linux",
   8: "AndroidPad",
   9: "iPad",
-};
+} as const;
 
 const platformToDetails = (state?: UserOnlineState) => {
   if (!state || state.status === OnlineState.Offline) return t("placeholder.offLine");
   let string = "";
-  state.platformIDs?.map((platform) => (string += `${platformMap[platform]}/`));
-  return `${string.slice(0, -1)}${t("placeholder.online")}`;
+  state.platformIDs?.forEach((platform) => {
+    const platformName = platformMap[platform as keyof typeof platformMap];
+    if (platformName) {
+      string += `${platformName}/`;
+    }
+  });
+  return string
+    ? `${string.slice(0, -1)}${t("placeholder.online")}`
+    : t("placeholder.online");
 };

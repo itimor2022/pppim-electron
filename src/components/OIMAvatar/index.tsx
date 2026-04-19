@@ -3,7 +3,6 @@ import clsx from "clsx";
 import * as React from "react";
 import { useMemo } from "react";
 
-// import default_group from "@/assets/images/contact/group.png";
 import default_group from "@/assets/images/contact/my_groups.png";
 import { useMessageStore, useUserStore } from "@/store";
 import { avatarList, getDefaultAvatar } from "@/utils/avatar";

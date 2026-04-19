@@ -126,7 +126,7 @@ const MeetingManageModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown
           />
         );
       default:
-        return null;
+        break;
     }
   };
 

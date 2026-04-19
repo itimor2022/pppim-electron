@@ -147,9 +147,9 @@ export default class EditableDiv extends React.Component<Props> {
         ref:
           typeof innerRef === "function"
             ? (current: HTMLElement) => {
-              innerRef(current);
-              this.el.current = current;
-            }
+                innerRef(current);
+                this.el.current = current;
+              }
             : innerRef || this.el,
         onInput: this.emitChange,
         onBlur: this.onBlur,
@@ -296,5 +296,4 @@ export interface Props extends DivProps {
   className?: string;
   style?: React.CSSProperties;
   innerRef?: React.RefObject<HTMLElement> | ((instance: HTMLElement) => void);
-  placeholder?: string;
 }

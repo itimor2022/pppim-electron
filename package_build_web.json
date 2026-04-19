@@ -1,5 +1,5 @@
 {
-  "name": "享聊",
+  "name": "OpenIM-CER",
   "version": "1.0.0",
   "main": "dist-electron/main/index.js",
   "description": "OpenIM PC Refactor.",
@@ -83,7 +83,7 @@
     "localforage": "^1.10.0",
     "md5": "^2.3.0",
     "mitt": "^3.0.0",
-    "open-im-sdk-wasm": "^3.5.1-alpha.3",
+    "open-im-sdk-wasm": "^3.5.1-alpha.2.1",
     "react-draggable": "^4.4.5",
     "react-i18next": "^12.3.1",
     "react-query": "^3.39.3",

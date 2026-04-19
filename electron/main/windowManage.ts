@@ -8,6 +8,7 @@ import { getIsForceQuit } from "./appManage";
 import { maxInstanceCount, singleInstanceLock } from "../config";
 import { initDownloadManage } from "./downloadManage";
 import { registerShortcuts, unregisterShortcuts } from "./shortcutManage";
+import { startLocalServer, stopLocalServer } from "./localServer";
 
 const url = process.env.VITE_DEV_SERVER_URL;
 let mainWindow: BrowserWindow | null = null;
@@ -32,8 +33,8 @@ function createSplashWindow() {
 export function createMainWindow() {
   createSplashWindow();
   mainWindow = new BrowserWindow({
-    title: "享聊",
-    icon: join(global.pathConfig.publicPath, "icons/icon.ico"),
+    title: "OpenIM",
+    icon: join(global.pathConfig.publicPath, "favicon.ico"),
     frame: false,
     show: false,
     minWidth: 680,
@@ -56,22 +57,32 @@ export function createMainWindow() {
   const cleanDownloadTask = initDownloadManage(mainWindow.webContents);
 
   if (process.env.VITE_DEV_SERVER_URL) {
-    // Open devTool if the app is not packaged
+    // 开发环境：使用 Vite 服务器
     mainWindow.loadURL(url);
+    mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
-    mainWindow.loadFile(global.pathConfig.indexHtml);
+    // 生产环境：启动本地 HTTP 服务器
+    const distPath = global.pathConfig.distPath;
+    console.log("[Main] Starting local server, distPath:", distPath);
+    
+    startLocalServer(distPath)
+      .then((port) => {
+        const localUrl = `http://127.0.0.1:${port}`;
+        console.log(`[Main] Loading from local server: ${localUrl}`);
+        mainWindow.loadURL(localUrl);
+      })
+      .catch((err) => {
+        console.error("[Main] Failed to start local server:", err);
+        console.error("[Main] Error stack:", err.stack);
+        // 显示错误对话框
+        dialog.showErrorBox(
+          "启动失败",
+          `本地服务器启动失败:\n${err.message}\n\n将尝试使用 file:// 协议加载`
+        );
+        // 降级到 file:// 协议
+        mainWindow.loadFile(global.pathConfig.indexHtml);
+      });
   }
-
-  // 注入 COop/COEP 头以支持 SharedArrayBuffer (SQLite WASM 需要)
-  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        "Cross-Origin-Opener-Policy": ["same-origin"],
-        "Cross-Origin-Embedder-Policy": ["require-corp"],
-      },
-    });
-  });
 
   // Test actively push message to the Electron-Renderer
   mainWindow.webContents.on("did-finish-load", () => {
@@ -103,6 +114,7 @@ export function createMainWindow() {
       destroyTray();
       clearChildWindows();
       cleanDownloadTask();
+      stopLocalServer(); // 停止本地服务器
     } else {
       e.preventDefault();
       if (isMac && mainWindow.isFullScreen()) {
@@ -264,7 +276,6 @@ export const setIgnoreMouseEvents = (
   if (!mainWindow) return;
   mainWindow.setIgnoreMouseEvents(ignore, options);
 };
-
 export const toggleDevTools = () => {
   if (!mainWindow) return;
   if (mainWindow.webContents.isDevToolsOpened()) {

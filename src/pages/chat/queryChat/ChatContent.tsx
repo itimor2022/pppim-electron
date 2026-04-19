@@ -61,7 +61,7 @@ const ChatContent = ({ isNotificationSession }: { isNotificationSession: boolean
     if (jumpClientMsgID) {
       const jumpEl = document.getElementById(`chat_${jumpClientMsgID}`);
       jumpEl?.scrollIntoView({
-        behavior: "instant" as ScrollBehavior,
+        behavior: "instant",
       });
       setTimeout(() => {
         setLockScroll(false);
@@ -87,7 +87,7 @@ const ChatContent = ({ isNotificationSession }: { isNotificationSession: boolean
       if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
         setTimeout(() => {
           const el = document.getElementById(
-            `chat_${latestMessageList.current?.[1]?.clientMsgID}`,
+            `chat_${latestMessageList.current[1].clientMsgID}`,
           );
           el?.scrollIntoView({
             block: "end",

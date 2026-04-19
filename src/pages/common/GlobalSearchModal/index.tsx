@@ -84,10 +84,9 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
     const downloadSuccessHandler = (url: string, filePath: string) => {
       const { clientMsgID } = useMessageStore.getState().downloadMap[url];
 
-      const index =
-        latestHistoryFiles.current?.data.findIndex(
-          (message) => message.clientMsgID === clientMsgID,
-        ) ?? -1;
+      const index = latestHistoryFiles.current.data.findIndex(
+        (message) => message.clientMsgID === clientMsgID,
+      );
       if (index > -1) {
         setHistoryFiles((state) => {
           const tmpMessage = [...state.data];
@@ -418,7 +417,7 @@ const SearchBar: ForwardRefRenderFunction<
         value={keyword}
         ref={inputRef}
         onChange={(e) => onChange(e.target.value)}
-      // onPressEnter={(e) => onPressEnter(e.currentTarget.value)}
+        // onPressEnter={(e) => onPressEnter(e.currentTarget.value)}
       />
     </div>
   );

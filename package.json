@@ -1,8 +1,8 @@
 {
-  "name": "GL",
-  "version": "3.3.0",
+  "name": "OpenIM-CER",
+  "version": "1.0.0",
   "main": "dist-electron/main/index.js",
-  "description": "享聊 PC 客户端.",
+  "description": "OpenIM PC Refactor.",
   "author": "blooming",
   "private": true,
   "debug": {
@@ -11,86 +11,22 @@
     }
   },
   "scripts": {
-    "dev": "vite --host",
-    "build": "vite build && electron-builder",
+    "dev": "vite --force --host",
+    "build": "vite build",
     "preview": "vite preview",
-    "build:mac": "vite build  &&  electron-builder --macos --x64",
-    "build:mac-arm": "vite build  &&  electron-builder --macos --arm64",
-    "build:win": "vite build  &&  electron-builder --win --x64",
-    "build:win-arm": "vite build  &&  electron-builder --win --arm64",
-    "build:linux": "vite build  &&  electron-builder --linux --x64",
-    "build:linux-arm": "vite build  &&  electron-builder --linux --arm64",
-    "generate-icons": "node generate_icons_simple.js",
-    "generate-icons-advanced": "node generate_icons.js",
     "pree2e": "vite build --mode=test",
     "e2e": "playwright test",
     "format": "prettier --write .",
     "lint": "eslint --ext .js,.jsx,.ts,.tsx src",
-    "lint:fix": "eslint --ext .js,.jsx,.ts,.tsx --fix --quiet src"
-  },
-  "engines": {
-    "node": "^14.18.0 || >=16.0.0"
-  },
-  "build": {
-    "extends": null,
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*"
-    ],
-    "directories": {
-      "output": "package"
-    },
-    "productName": "享聊",
-    "win": {
-      "icon": "./dist/icons/icon.ico",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "mac": {
-      "icon": "./dist/icons/icon.png"
-    },
-    "linux": {
-      "icon": "./dist/icons/icon.png",
-      "target": "deb",
-      "maintainer": "openim-cer"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": true,
-      "allowElevation": true,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": true,
-      "shortcutName": "享聊",
-      "installerIcon": "./dist/icons/icon.ico",
-      "uninstallerIcon": "./dist/icons/icon.ico",
-      "installerHeaderIcon": "./dist/icons/icon.ico"
-    },
-    "asar": true,
-    "extraResources": {
-      "from": "./extraResources/",
-      "to": "extraResources"
-    }
-  },
-  "lint-staged": {
-    "src/**/*.{tsx,ts}": [
-      "prettier --write",
-      "eslint --fix"
-    ],
-    "*.{json,html,css,scss,xml,md}": [
-      "prettier --write"
-    ]
+    "lint:fix": "eslint --ext .js,.jsx,.ts,.tsx --fix --quiet src",
+    "prepare": "husky install",
+    "postinstall": "patch-package"
   },
   "devDependencies": {
+    "@commitlint/cli": "^17.4.4",
+    "@commitlint/config-conventional": "^17.4.4",
+    "@playwright/test": "^1.31.0",
     "@types/md5": "^2.3.2",
-    "@types/minimatch": "^5.1.2",
     "@types/react": "^18.0.28",
     "@types/react-dom": "^18.0.11",
     "@types/uuid": "^9.0.1",
@@ -107,6 +43,7 @@
     "eslint-plugin-react": "^7.32.2",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-simple-import-sort": "^10.0.0",
+    "husky": "^8.0.3",
     "lint-staged": "^13.1.2",
     "patch-package": "^8.0.0",
     "postcss": "^8.4.21",
@@ -122,6 +59,18 @@
     "vite": "^4.1.4",
     "vite-electron-plugin": "^0.8.2",
     "vite-plugin-electron": "^0.11.1"
+  },
+  "engines": {
+    "node": "^14.18.0 || >=16.0.0"
+  },
+  "lint-staged": {
+    "src/**/*.{tsx,ts}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{json,html,css,scss,xml,md}": [
+      "prettier --write"
+    ]
   },
   "dependencies": {
     "@ant-design/icons": "^5.1.4",
@@ -140,6 +89,7 @@
     "electron-store": "^8.1.0",
     "electron-updater": "^5.3.0",
     "emoji-picker-element": "^1.18.3",
+    "express": "^5.2.1",
     "i18next": "^22.5.0",
     "i18next-browser-languagedetector": "^7.0.2",
     "i18next-fs-backend": "^2.2.0",
@@ -147,7 +97,7 @@
     "localforage": "^1.10.0",
     "md5": "^2.3.0",
     "mitt": "^3.0.0",
-    "open-im-sdk-wasm": "^3.5.1",
+    "open-im-sdk-wasm": "^3.5.1-alpha.2.2",
     "react-draggable": "^4.4.5",
     "react-i18next": "^12.3.1",
     "react-image-file-resizer": "^0.4.8",

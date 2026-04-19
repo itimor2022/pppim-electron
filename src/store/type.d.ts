@@ -37,6 +37,10 @@ export interface AppConfig {
   ordinaryUserAddFriend: number;
   allowSendMsgNotFriend: number;
   needInvitationCodeRegister: number;
+  showMessageReadStatus: number | string;
+  showOnlinePlatform: number | string;
+  showUserOnlineStatus: number | string;
+  showGroupAllMembers: number | string;
 }
 
 export interface UpdateMessaggeBaseInfoParams {
@@ -65,6 +69,7 @@ export interface ConversationStore {
   unReadCount: number;
   currentGroupInfo?: GroupItem;
   currentMemberInGroup?: GroupMemberItem;
+  currentMemberInGroupLoading: boolean;
   quoteMessage?: MessageItem;
   revokeMap: Record<string, RevokeMessageData>;
   getConversationListByReq: (isOffset?: boolean) => Promise<boolean>;

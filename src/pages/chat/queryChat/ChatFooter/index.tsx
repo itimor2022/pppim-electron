@@ -82,6 +82,43 @@ const ChatFooter = () => {
     };
   }, [conversationID]);
 
+  // =============================================
+  // 新增：监听粘贴事件，支持粘贴截图/图片直接发送
+  // =============================================
+  useEffect(() => {
+    const el = editableDivRef.current?.el.current;
+    if (!el) return;
+
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith("image/")) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (!file) continue;
+
+          // 直接调用 createFileMessage + sendMessage 发送，无需插入 DOM
+          const message = await createFileMessage(file);
+          sendMessage({ message });
+          
+           // ↓ 新增这两行：清空输入框残留内容
+          setHtml("");
+          drft.current = "";
+
+          return;
+        }
+      }
+    };
+
+    el.addEventListener("paste", handlePaste);
+    return () => {
+      el.removeEventListener("paste", handlePaste);
+    };
+  }, [conversationID, createFileMessage, sendMessage]);
+  // =============================================
+
   const inputFocus = () => {
     restoreSelection();
     editableDivRef.current?.el.current?.focus();
@@ -142,8 +179,8 @@ const ChatFooter = () => {
 
   const { run: debounceSearch } = useDebounceFn(
     (keyword: string) => {
-      if (!latestPanelState.current?.visible) return;
-      const originStr = latestPanelState.current?.originStr;
+      if (!latestPanelState.current.visible) return;
+      const originStr = latestPanelState.current.originStr;
       const searKeyword = getExtraStr(getCleanText(originStr), getCleanText(keyword));
       atPanelRef.current?.searchMember(searKeyword);
     },
@@ -164,7 +201,7 @@ const ChatFooter = () => {
     if (e.target.value) {
       throttleTyping();
     }
-    if (!e.target.value && latestPanelState.current?.visible) {
+    if (!e.target.value && latestPanelState.current.visible) {
       closeAtPanel();
     }
   };
@@ -172,21 +209,21 @@ const ChatFooter = () => {
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (
       (e.key === "ArrowUp" || e.key === "ArrowDown") &&
-      latestPanelState.current?.visible
+      latestPanelState.current.visible
     ) {
       e.preventDefault();
     }
 
     if (
       (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
-      latestPanelState.current?.visible
+      latestPanelState.current.visible
     ) {
       closeAtPanel();
     }
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (latestPanelState.current?.visible) return;
+      if (latestPanelState.current.visible) return;
 
       debounceSend();
     }
@@ -195,7 +232,7 @@ const ChatFooter = () => {
       e.code === "Digit2" &&
       e.shiftKey &&
       useConversationStore.getState().currentConversation?.groupID &&
-      !latestPanelState.current?.visible
+      !latestPanelState.current.visible
     ) {
       setTimeout(() => {
         atPanelRef.current?.searchMember("");
@@ -205,7 +242,7 @@ const ChatFooter = () => {
       setTimeout(() => editableDivRef.current?.el.current?.blur());
       setAtPanelState({
         visible: true,
-        originStr: latestHtml.current || "",
+        originStr: latestHtml.current,
       });
     }
 
@@ -213,7 +250,7 @@ const ChatFooter = () => {
       const selection = window.getSelection();
       const range = selection!.getRangeAt(0);
       if (
-        latestPanelState.current?.visible &&
+        latestPanelState.current.visible &&
         range.startOffset > 0 &&
         range.startContainer.nodeType === Node.TEXT_NODE
       ) {
@@ -288,7 +325,7 @@ const ChatFooter = () => {
       useConversationStore.getState().currentConversation?.groupID &&
       atEls.length > 0
     ) {
-      let formatAtText = latestHtml.current || "";
+      let formatAtText = latestHtml.current;
       atEls.map(
         (el) => (formatAtText = formatAtText.replace(el.tag, `@${el.userID} `)),
       );
@@ -300,7 +337,7 @@ const ChatFooter = () => {
             atUserID: at.userID,
             groupNickname: at.nickname,
           })),
-          message: latestQuoteMessage.current ?? undefined,
+          message: latestQuoteMessage.current,
         })
       ).data;
     }
@@ -317,7 +354,7 @@ const ChatFooter = () => {
   };
 
   const enterToSend = async () => {
-    const cleanText = getCleanText(latestHtml.current || "");
+    const cleanText = getCleanText(latestHtml.current);
     getImageEl();
     const message = await getTextMessage(cleanText);
     setHtml("");
@@ -336,7 +373,7 @@ const ChatFooter = () => {
     const atEls = getAtList();
     if (atEls.find((el) => el.userID === atUser.userID) || atEls.length > 9) return;
 
-    if (latestPanelState.current?.visible) {
+    if (latestPanelState.current.visible) {
       closeAtPanel();
     }
     const el = document.createElement("b");
@@ -394,8 +431,9 @@ const ChatFooter = () => {
                 <div
                   className="ml-1.5 line-clamp-1 text-xs text-[var(--sub-text)]"
                   title=""
-                >{`${t("placeholder.reply")}${quoteMessage.senderNickname
-                  }：${formatMessageByType(quoteMessage)}`}</div>
+                >{`${t("placeholder.reply")}${
+                  quoteMessage.senderNickname
+                }：${formatMessageByType(quoteMessage)}`}</div>
               </div>
             )}
             <EditableDiv

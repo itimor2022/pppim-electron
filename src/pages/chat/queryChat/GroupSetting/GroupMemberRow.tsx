@@ -7,7 +7,9 @@ import invite from "@/assets/images/chatSetting/invite.png";
 import kick from "@/assets/images/chatSetting/kick.png";
 import OIMAvatar from "@/components/OIMAvatar";
 import useGroupMembers from "@/hooks/useGroupMembers";
+import { useUserStore } from "@/store";
 import emitter from "@/utils/events";
+import { getDisplayMemberCount } from "@/utils/group";
 
 import styles from "./group-setting.module.scss";
 
@@ -21,6 +23,9 @@ const GroupMemberRow = ({
   updateTravel: () => void;
 }) => {
   const { fetchState, getMemberData, resetState } = useGroupMembers();
+  const showGroupAllMembers = useUserStore(
+    (state) => Number(state.appConfig.showGroupAllMembers ?? 1) === 1,
+  );
 
   useEffect(() => {
     if (currentGroupInfo?.groupID) {
@@ -32,6 +37,16 @@ const GroupMemberRow = ({
   }, [currentGroupInfo?.groupID]);
 
   const sliceCount = isNomal ? 17 : 16;
+  const displayMemberCount = getDisplayMemberCount(
+    currentGroupInfo?.memberCount,
+    currentGroupInfo?.ex,
+  );
+  const filteredMembers =
+    !showGroupAllMembers && isNomal
+      ? fetchState.groupMemberList.filter(
+          (member) => member.roleLevel === 100 || member.roleLevel === 60,
+        )
+      : fetchState.groupMemberList;
 
   const inviteMember = (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
     e.stopPropagation();
@@ -53,10 +68,14 @@ const GroupMemberRow = ({
     <div className="p-4">
       <div className="mb-3 font-medium">
         <span>{t("placeholder.groupMember")}</span>
-        <span className="ml-2">{currentGroupInfo?.memberCount}</span>
+        <span className="ml-2">
+          {!showGroupAllMembers && isNomal
+            ? filteredMembers.length
+            : displayMemberCount}
+        </span>
       </div>
       <div className="flex flex-wrap items-center">
-        {fetchState.groupMemberList.slice(0, sliceCount).map((member) => (
+        {filteredMembers.slice(0, sliceCount).map((member) => (
           <div
             key={member.userID}
             title={member.nickname}
@@ -90,12 +109,14 @@ const GroupMemberRow = ({
           </div>
         )}
       </div>
-      <div
-        className="flex cursor-pointer items-center justify-center pt-2 text-xs text-[var(--primary)]"
-        onClick={updateTravel}
-      >
-        {t("placeholder.viewMore")}
-      </div>
+      {(showGroupAllMembers || !isNomal) && (
+        <div
+          className="flex cursor-pointer items-center justify-center pt-2 text-xs text-[var(--primary)]"
+          onClick={updateTravel}
+        >
+          {t("placeholder.viewMore")}
+        </div>
+      )}
     </div>
   );
 };

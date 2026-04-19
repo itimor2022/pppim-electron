@@ -1,17 +1,24 @@
-import { Button, Form, Input, message } from "antd";
+import { Button, Form, Input, QRCode, Select, Space, Tabs } from "antd";
 import { t } from "i18next";
 import md5 from "md5";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useLogin } from "@/api/login";
+import { useLogin, useSendSms } from "@/api/login";
+import login_pc from "@/assets/images/login/login_pc.png";
+import login_qr from "@/assets/images/login/login_qr.png";
 import {
+  getEmail,
   getPhoneNumber,
   setAreaCode,
+  setEmail,
   setIMProfile,
   setPhoneNumber,
 } from "@/utils/storage";
+
+import { areaCode } from "./areaCode";
 import type { FormType } from "./index";
+import styles from "./index.module.scss";
 
 // 0login 1resetPassword 2register
 enum LoginType {
@@ -30,92 +37,58 @@ const LoginForm = ({ loginMethod, setFormType, updateLoginMethod }: LoginFormPro
   const [form] = Form.useForm();
   const [loginType, setLoginType] = useState<LoginType>(LoginType.Password);
   const { mutate: login, isLoading: loginLoading } = useLogin();
+  const { mutate: semdSms } = useSendSms();
 
-  // const [countdown, setCountdown] = useState(0);
-  // useEffect(() => {
-  //   if (countdown > 0) {
-  //     const timer = setTimeout(() => {
-  //       setCountdown((prevCountdown) => prevCountdown - 1);
-  //       if (countdown === 1) {
-  //         clearTimeout(timer);
-  //         setCountdown(0);
-  //       }
-  //     }, 1000);
-  //
-  //     return () => clearTimeout(timer);
-  //   }
-  // }, [countdown]);
+  const [countdown, setCountdown] = useState(0);
+  useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => {
+        setCountdown((prevCountdown) => prevCountdown - 1);
+        if (countdown === 1) {
+          clearTimeout(timer);
+          setCountdown(0);
+        }
+      }, 1000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [countdown]);
 
   const onFinish = (params: API.Login.LoginParams) => {
-    console.log("🚀 [LoginForm] 开始登录流程", {
-      loginType,
-      params: { ...params, password: params.password ? "***" : undefined },
-      timestamp: new Date().toISOString()
-    });
-
     if (loginType === 0) {
       params.password = md5(params.password ?? "");
-      console.log("🔐 [LoginForm] 密码已加密");
     }
-
     setAreaCode(params.areaCode);
     if (params.phoneNumber) {
       setPhoneNumber(params.phoneNumber);
-      console.log("📱 [LoginForm] 保存手机号到本地存储");
     }
-    // if (params.email) {
-    //   setEmail(params.email);
-    //   console.log("📧 [LoginForm] 保存邮箱到本地存储");
-    // }
-
-    console.log("🌐 [LoginForm] 发起登录API请求");
+    if (params.email) {
+      setEmail(params.email);
+    }
     login(params, {
-      onSuccess: (data) => {
-        console.log("✅ [LoginForm] 登录API成功", {
-          hasData: !!data,
-          hasDataData: !!data?.data,
-          userID: data?.data?.userID,
-          hasChatToken: !!data?.data?.chatToken,
-          hasImToken: !!data?.data?.imToken,
-          timestamp: new Date().toISOString()
-        });
-
+      onSuccess: async (data) => {
         const { chatToken, imToken, userID } = data.data;
-        console.log("💾 [LoginForm] 开始保存用户信息到本地存储", {
-          userID,
-          hasChatToken: !!chatToken,
-          hasImToken: !!imToken
-        });
-
-        setIMProfile({ chatToken, imToken, userID });
-        console.log("🔄 [LoginForm] 用户信息已保存，准备跳转到聊天页面");
+        await setIMProfile({ chatToken, imToken, userID });
         navigate("/chat");
-        console.log("🎯 [LoginForm] 已调用navigate('/chat')");
       },
-      onError: (error) => {
-        console.error("❌ [LoginForm] 登录失败", {
-          error,
-          timestamp: new Date().toISOString()
-        });
-      }
     });
   };
 
-  // const sendSmsHandle = () => {
-  //   semdSms(
-  //     {
-  //       phoneNumber: form.getFieldValue("phoneNumber") as string,
-  //       email: form.getFieldValue("email") as string,
-  //       areaCode: form.getFieldValue("areaCode") as string,
-  //       usedFor: 3,
-  //     },
-  //     {
-  //       onSuccess() {
-  //         setCountdown(60);
-  //       },
-  //     },
-  //   );
-  // };
+  const sendSmsHandle = () => {
+    semdSms(
+      {
+        phoneNumber: form.getFieldValue("phoneNumber") as string,
+        email: form.getFieldValue("email") as string,
+        areaCode: form.getFieldValue("areaCode") as string,
+        usedFor: 3,
+      },
+      {
+        onSuccess() {
+          setCountdown(60);
+        },
+      },
+    );
+  };
 
   // const Point = () => (
   //   <div
@@ -151,15 +124,9 @@ const LoginForm = ({ loginMethod, setFormType, updateLoginMethod }: LoginFormPro
   //   );
   // }
 
-  // const onLoginMethodChange = (key: string) => {
-  //   // 拦截邮箱登录切换
-  //   if (key === "email") {
-  //     message.warning(t("toast.featureNotAvailable"));
-  //     return;
-  //   }
-  //   // 原先的代码
-  //   updateLoginMethod(key as "phone" | "email");
-  // };
+  const onLoginMethodChange = (key: string) => {
+    updateLoginMethod(key as "phone" | "email");
+  };
 
   return (
     <>
@@ -167,7 +134,15 @@ const LoginForm = ({ loginMethod, setFormType, updateLoginMethod }: LoginFormPro
         <div className="text-xl font-medium">{t("placeholder.welcome")}</div>
         {/* <Point /> */}
       </div>
-      {/* 登录方式切换标签已隐藏，默认使用手机号登录 */}
+      <Tabs
+        className={styles["login-method-tab"]}
+        activeKey={loginMethod}
+        items={[
+          { key: "phone", label: "手机号" },
+          { key: "email", label: "邮箱" },
+        ]}
+        onChange={onLoginMethodChange}
+      />
       <Form
         form={form}
         layout="vertical"
@@ -177,39 +152,75 @@ const LoginForm = ({ loginMethod, setFormType, updateLoginMethod }: LoginFormPro
         initialValues={{
           areaCode: "+86",
           phoneNumber: getPhoneNumber() ?? "",
-          // email: getEmail() ?? "",
+          email: getEmail() ?? "",
         }}
       >
-        {/* 默认手机号登录：去掉区号选择，仅保留普通输入框 */}
-        <Form.Item name="areaCode" initialValue={"+86"} hidden>
-          <Input />
-        </Form.Item>
-        <Form.Item
-          label={"账号"}
-          name="phoneNumber"
-          rules={[
-            { required: true, message: "请输入账号" },
-            { pattern: /^\d{11}$/, message: "请输入11位手机号" },
-          ]}
-        >
-          <Input allowClear placeholder={"请输入11位手机号"} maxLength={11} />
-        </Form.Item>
+        {loginMethod === "phone" ? (
+          <Form.Item label={t("placeholder.phoneNumber")}>
+            <Space.Compact className="w-full">
+              <Form.Item name="areaCode" noStyle>
+                <Select options={areaCode} className="!w-28" />
+              </Form.Item>
+              <Form.Item name="phoneNumber" noStyle>
+                <Input allowClear placeholder={t("toast.inputPhoneNumber")} />
+              </Form.Item>
+            </Space.Compact>
+          </Form.Item>
+        ) : (
+          <Form.Item
+            label={t("placeholder.email")}
+            name="email"
+            rules={[{ type: "email", message: t("toast.inputCorrectEmail") }]}
+          >
+            <Input allowClear placeholder={t("toast.inputEmail")} />
+          </Form.Item>
+        )}
 
-        {/* 验证码登录已隐藏，默认使用密码登录 */}
-        <Form.Item label={t("placeholder.password")} name="password">
-          <Input.Password allowClear placeholder={t("toast.inputPassword")} />
-        </Form.Item>
+        {loginType === LoginType.VerifyCode ? (
+          <Form.Item label={t("placeholder.verifyCode")} name="verifyCode">
+            <Space.Compact className="w-full">
+              <Input
+                allowClear
+                placeholder={t("toast.inputVerifyCode")}
+                className="w-full"
+              />
+              <Button type="primary" onClick={sendSmsHandle} loading={countdown > 0}>
+                {countdown > 0
+                  ? t("date.second", { num: countdown })
+                  : t("placeholder.sendVerifyCode")}
+              </Button>
+            </Space.Compact>
+          </Form.Item>
+        ) : (
+          <Form.Item label={t("placeholder.password")} name="password">
+            <Input.Password allowClear placeholder={t("toast.inputPassword")} />
+          </Form.Item>
+        )}
 
-        {/*
         <div className="mb-10 flex flex-row justify-between">
-          <span className="cursor-pointer text-sm text-gray-400" onClick={() => setFormType(1)}>
+          <span
+            className="cursor-pointer text-sm text-gray-400"
+            onClick={() => setFormType(1)}
+          >
             {t("placeholder.forgetPassword")}
           </span>
-          <span className="cursor-pointer text-sm text-[var(--primary)]">
-            {`${t("placeholder.verifyCode")}${t("placeholder.login")}`}
+          <span
+            className="cursor-pointer text-sm text-[var(--primary)]"
+            onClick={() =>
+              setLoginType(
+                loginType === LoginType.Password
+                  ? LoginType.VerifyCode
+                  : LoginType.Password,
+              )
+            }
+          >
+            {`${
+              loginType === LoginType.Password
+                ? t("placeholder.verifyCode")
+                : t("placeholder.password")
+            }${t("placeholder.login")}`}
           </span>
         </div>
-        */}
 
         <Form.Item className="mb-4">
           <Button type="primary" htmlType="submit" block loading={loginLoading}>

@@ -64,9 +64,9 @@ const MediaMessagePane = ({
       const messageKeyList = ["weekMessage", "monthMessage", "earlierMessage"] as const;
 
       const handleIndex = (key: (typeof messageKeyList)[number]) => {
-        const index = latestLoadState.current?.[key]?.findIndex(
+        const index = latestLoadState.current[key].findIndex(
           (message) => message.clientMsgID === clientMsgID,
-        ) ?? -1;
+        );
         if (index > -1) {
           setLoadState((state) => {
             const tmpMessage = [...state[key]];
@@ -83,7 +83,7 @@ const MediaMessagePane = ({
 
       if (!isMediaMessage) return;
 
-      const tmpPreviewList = [...(latestLoadState.current?.previewItems ?? [])];
+      const tmpPreviewList = [...latestLoadState.current.previewItems];
       const idx = tmpPreviewList.findIndex((item) => item.clientMsgID === clientMsgID);
       if (idx >= 0) {
         tmpPreviewList[idx].url = `file://${filePath}`;

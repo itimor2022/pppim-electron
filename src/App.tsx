@@ -3,7 +3,7 @@ import enUS from "antd/locale/en_US";
 import zhCN from "antd/locale/zh_CN";
 import { Suspense, useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "react-query";
-
+import { ReactQueryDevtools } from "react-query/devtools";
 import { RouterProvider } from "react-router-dom";
 
 import AntdGlobalComp from "./AntdGlobalComp";
@@ -39,7 +39,7 @@ function App() {
             <RouterProvider router={router} />
           </AntdApp>
         </Suspense>
-
+        <ReactQueryDevtools initialIsOpen={false} />
       </QueryClientProvider>
     </ConfigProvider>
   );

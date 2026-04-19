@@ -76,7 +76,7 @@ export function useMessageFileDownloadState(
       {
         conversationID:
           useConversationStore.getState().currentConversation?.conversationID ?? "",
-        clientMsgIDList: [latestMessage.current?.clientMsgID || ""],
+        clientMsgIDList: [latestMessage.current.clientMsgID],
       },
     ]);
     const message = data.findResultItems?.[0].messageList[0];
@@ -125,7 +125,6 @@ export function useMessageFileDownloadState(
     }
 
     if (!latestCurrentTask.current) {
-      if (!latestMessage.current) return;
       const { url, saveType } = getSourceData(latestMessage.current);
       let conversationID =
         useConversationStore.getState().currentConversation?.conversationID;

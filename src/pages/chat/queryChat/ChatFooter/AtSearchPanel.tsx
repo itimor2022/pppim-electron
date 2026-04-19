@@ -16,7 +16,7 @@ import {
 import OIMAvatar from "@/components/OIMAvatar";
 import { useCurrentMemberRole } from "@/hooks/useCurrentMemberRole";
 import { IMSDK } from "@/layout/MainContentWrap";
-import { useConversationStore } from "@/store";
+import { useConversationStore, useUserStore } from "@/store";
 
 export interface AtSearchPanelHandle {
   searchMember: (keyword: string) => Promise<void>;
@@ -48,8 +48,16 @@ const AtSearchPanel: ForwardRefRenderFunction<
   const [searchData, setSearchData] = useState<GroupMemberItem[]>([]);
   const latestOpen = useLatest(open);
   const { isAdmin, isOwner } = useCurrentMemberRole();
+  const showGroupAllMembers = useUserStore(
+    (state) => Number(state.appConfig.showGroupAllMembers ?? 1) === 1,
+  );
 
   const canAtAll = isAdmin || isOwner;
+  const shouldLimitVisibleMembers = !showGroupAllMembers && !canAtAll;
+  const filterMembers = (list: GroupMemberItem[]) =>
+    shouldLimitVisibleMembers
+      ? list.filter((member) => member.roleLevel === 100 || member.roleLevel === 60)
+      : list;
 
   const { runAsync: requestSearchMembers, loading: searchLoading } = useRequest(
     IMSDK.searchGroupMembers,
@@ -93,6 +101,7 @@ const AtSearchPanel: ForwardRefRenderFunction<
       } else {
         memberList = (await requestMemberList(options)).data;
       }
+      memberList = filterMembers(memberList);
       setSearchData([...memberList]);
       setActiveUserID(canAtAll && !keyword ? AT_ALL_KEY : memberList[0]?.userID);
     } catch (error) {

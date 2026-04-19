@@ -28,6 +28,7 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
   unReadCount: 0,
   currentGroupInfo: undefined,
   currentMemberInGroup: undefined,
+  currentMemberInGroupLoading: false,
   quoteMessage: undefined,
   revokeMap: {} as Record<string, RevokeMessageData>,
   getConversationListByReq: async (isOffset?: boolean) => {
@@ -91,6 +92,7 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
         quoteMessage: undefined,
         currentGroupInfo: undefined,
         currentMemberInGroup: undefined,
+        currentMemberInGroupLoading: false,
       }));
       return;
     }
@@ -99,8 +101,18 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
     const toggleNewConversation =
       conversation.conversationID !== prevConversation?.conversationID;
     if (toggleNewConversation && isGroupSession(conversation.conversationType)) {
+      set(() => ({
+        currentMemberInGroup: undefined,
+        currentMemberInGroupLoading: true,
+      }));
       get().getCurrentGroupInfoByReq(conversation.groupID);
       get().getCurrentMemberInGroupByReq(conversation.groupID);
+    } else if (toggleNewConversation) {
+      set(() => ({
+        currentGroupInfo: undefined,
+        currentMemberInGroup: undefined,
+        currentMemberInGroupLoading: false,
+      }));
     }
     if (toggleNewConversation && !isJump) {
       useMessageStore.getState().updateJumpClientMsgID();
@@ -135,8 +147,9 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
     set(() => ({ currentGroupInfo: { ...groupInfo } }));
   },
   getCurrentMemberInGroupByReq: async (groupID: string) => {
-    let memberInfo: GroupMemberItem;
+    let memberInfo: GroupMemberItem | undefined;
     const selfID = useUserStore.getState().selfInfo.userID;
+    set(() => ({ currentMemberInGroupLoading: true }));
     try {
       const { data } = await IMSDK.getSpecifiedGroupMembersInfo({
         groupID,
@@ -145,9 +158,18 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
       memberInfo = data[0];
     } catch (error) {
       feedbackToast({ error, msg: t("toast.getGroupMemberFailed") });
+      set(() => ({ currentMemberInGroupLoading: false }));
       return;
     }
-    set(() => ({ currentMemberInGroup: { ...memberInfo } }));
+    const currentGroupID = get().currentConversation?.groupID;
+    if (currentGroupID !== groupID) {
+      set(() => ({ currentMemberInGroupLoading: false }));
+      return;
+    }
+    set(() => ({
+      currentMemberInGroup: memberInfo ? { ...memberInfo } : undefined,
+      currentMemberInGroupLoading: false,
+    }));
   },
   tryUpdateCurrentMemberInGroup: (member: GroupMemberItem) => {
     const currentMemberInGroup = get().currentMemberInGroup;
@@ -179,6 +201,7 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
       unReadCount: 0,
       currentGroupInfo: undefined,
       currentMemberInGroup: undefined,
+      currentMemberInGroupLoading: false,
       quoteMessage: undefined,
     }));
   },

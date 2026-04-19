@@ -67,8 +67,7 @@ const RtcCallModal: ForwardRefRenderFunction<
         setAuthData(data);
         if (isGroup) setTimeout(() => setConnect(true));
       } catch (error) {
-        console.error("RTC1 invite error:", error);
-        // feedbackToast({ msg: t("toast.inviteUserFailed"), error });
+        feedbackToast({ msg: t("toast.inviteUserFailed"), error });
         closeOverlay();
       }
     }

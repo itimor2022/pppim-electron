@@ -15,7 +15,7 @@ export default defineConfig(({ command }) => {
   const sourcemap = command === "serve" || !!process.env.VSCODE_DEBUG;
 
   return {
-    base: "./",  // 使用相对路径，解决 Electron 打包后资源加载问题
+    base: "./",
     resolve: {
       alias: {
         "@": path.join(__dirname, "src"),
@@ -54,26 +54,9 @@ export default defineConfig(({ command }) => {
           return {
             host: url.hostname,
             port: +url.port,
-            // 配置WASM文件的正确MIME类型
-            headers: {
-              'Cross-Origin-Embedder-Policy': 'require-corp',
-              'Cross-Origin-Opener-Policy': 'same-origin',
-            },
-            fs: {
-              allow: ['..']
-            }
           };
         })()
-      : {
-          // 开发服务器配置WASM MIME类型
-          headers: {
-            'Cross-Origin-Embedder-Policy': 'require-corp',
-            'Cross-Origin-Opener-Policy': 'same-origin',
-          },
-          fs: {
-            allow: ['..']
-          }
-        },
+      : undefined,
     clearScreen: false,
     build: {
       sourcemap: false,

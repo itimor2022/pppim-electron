@@ -218,49 +218,21 @@ export function useGlobalEvent() {
   }, []);
 
   const loginCheck = async () => {
-    console.log("🔍 [LoginCheck] 开始检查登录状态");
-
     const IMToken = (await getIMToken()) as string;
     const IMUserID = (await getIMUserID()) as string;
-
-    console.log("🔍 [LoginCheck] 从存储中获取用户信息", {
-      hasIMToken: !!IMToken,
-      hasIMUserID: !!IMUserID,
-      IMUserID,
-      tokenLength: IMToken?.length,
-      timestamp: new Date().toISOString()
-    });
-
     if (!IMToken || !IMUserID) {
-      console.log("❌ [LoginCheck] 缺少必要的登录信息，清除用户数据并跳转到登录页");
       clearIMProfile();
       navigate("/login");
       return;
     }
-
-    console.log("✅ [LoginCheck] 登录信息完整，尝试登录SDK");
     tryLogin();
   };
 
   const tryLogin = async () => {
-    console.log("🔄 [TryLogin] 开始尝试SDK登录");
     setConnectState((state) => ({ ...state, isLogining: true }));
-
     const IMToken = (await getIMToken()) as string;
     const IMUserID = (await getIMUserID()) as string;
-
-    console.log("🔄 [TryLogin] 准备SDK登录参数", {
-      userID: IMUserID,
-      hasToken: !!IMToken,
-      tokenLength: IMToken?.length,
-      platformID: window.electronAPI?.getPlatform() ?? 5,
-      apiAddr: getApiUrl(),
-      wsAddr: getWsUrl(),
-      timestamp: new Date().toISOString()
-    });
-
     try {
-      console.log("🚀 [TryLogin] 调用IMSDK.login");
       await IMSDK.login({
         userID: IMUserID,
         token: IMToken,
@@ -269,30 +241,15 @@ export function useGlobalEvent() {
         wsAddr: getWsUrl(),
         logLevel: LogLevel.Debug,
       });
-
-      console.log("✅ [TryLogin] SDK登录成功");
       window.electronAPI?.ipcInvoke("setUserCachePath", IMUserID);
-      console.log("🔄 [TryLogin] 开始初始化Store");
       initStore();
-      console.log("✅ [TryLogin] Store初始化完成");
     } catch (error) {
-      console.error("❌ [TryLogin] SDK登录失败", {
-        error,
-        errCode: (error as WsResponse)?.errCode,
-        errMsg: (error as WsResponse)?.errMsg,
-        timestamp: new Date().toISOString()
-      });
-
       if ((error as WsResponse).errCode !== 10102) {
-        console.log("🔄 [TryLogin] 错误码不是10102，清除用户数据并跳转登录页");
         clearIMProfile();
         navigate("/login");
-      } else {
-        console.log("⚠️ [TryLogin] 错误码是10102，不跳转登录页");
       }
     }
 
-    console.log("🔄 [TryLogin] 设置登录状态为false");
     setConnectState((state) => ({ ...state, isLogining: false }));
   };
 
@@ -591,7 +548,7 @@ export function useGlobalEvent() {
   const joinedGroupAddedHandler = ({ data }: WSEvent<GroupItem>) => {
     if (data.groupID === useConversationStore.getState().currentConversation?.groupID) {
       updateCurrentGroupInfo(data);
-      // getCurrentMemberInGroupByReq(group.groupID);
+      getCurrentMemberInGroupByReq(data.groupID);
     }
     pushNewGroup(data);
   };

@@ -16,7 +16,7 @@ import screenshotsManage from "./screenshotsManage";
 import { getLogger } from "../utils/log";
 import { initI18n } from "../i18n";
 
-export const logger = getLogger(join(app.getPath("userData"), `/享聊Data/logs`));
+export const logger = getLogger(join(app.getPath("userData"), `/OpenIMData/logs`));
 
 const init = async () => {
   await initI18n();

@@ -22,9 +22,17 @@ import { CustomEmojiItem } from "../../MessageItem/FaceMessageRender";
 import { useSendMessage } from "../useSendMessage";
 import { FileWithPath } from "./useFileMessage";
 
+const getEmojiDataSource = () => {
+  const electronPublicPath = window.electronAPI?.getDataPath("public");
+  if (electronPublicPath) {
+    return `${electronPublicPath}/emojis.json`;
+  }
+  return new URL("emojis.json", window.location.origin + import.meta.env.BASE_URL).toString();
+};
+
 const emojiPicker = new Picker({
   emojiVersion: 14,
-  dataSource: `${window.electronAPI?.getDataPath("public") ?? ""}/emojis.json`,
+  dataSource: getEmojiDataSource(),
 });
 emojiPicker.className = "light w-full h-full";
 const style = document.createElement("style");

@@ -47,9 +47,9 @@ const FileMessagePane = ({
     const downloadSuccessHandler = (url: string, filePath: string) => {
       const { clientMsgID } = useMessageStore.getState().downloadMap[url];
 
-      const index = latestLoadState.current?.messageList?.findIndex(
+      const index = latestLoadState.current.messageList.findIndex(
         (message) => message.clientMsgID === clientMsgID,
-      ) ?? -1;
+      );
       if (index > -1) {
         setLoadState((state) => {
           const tmpMessage = [...state.messageList];

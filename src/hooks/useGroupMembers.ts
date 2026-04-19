@@ -1,11 +1,15 @@
 import { useLatest } from "ahooks";
 import { CbEvents } from "open-im-sdk-wasm";
+import { GroupMemberFilter } from "open-im-sdk-wasm";
 import { GroupMemberItem, WSEvent } from "open-im-sdk-wasm/lib/types/entity";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { IMSDK } from "@/layout/MainContentWrap";
 import { useConversationStore } from "@/store";
+import { useUserStore } from "@/store";
 import { feedbackToast } from "@/utils/common";
+
+import { useCurrentMemberRole } from "./useCurrentMemberRole";
 
 export const REACH_SEARCH_FLAG = "LAST_FLAG";
 
@@ -26,6 +30,10 @@ interface UseGroupMembersProps {
 
 export default function useGroupMembers(props?: UseGroupMembersProps) {
   const { groupID, notRefresh } = props ?? {};
+  const showGroupAllMembers = useUserStore(
+    (state) => Number(state.appConfig.showGroupAllMembers ?? 1) === 1,
+  );
+  const { isAdmin, isOwner } = useCurrentMemberRole();
   const [fetchState, setFetchState] = useState<FetchStateType>({
     offset: 0,
     searchOffset: 0,
@@ -37,6 +45,15 @@ export default function useGroupMembers(props?: UseGroupMembersProps) {
   });
   const latestFetchState = useLatest(fetchState);
   const lastKeyword = useRef("");
+  const shouldLimitVisibleMembers = !showGroupAllMembers && !isAdmin && !isOwner;
+
+  const filterMembers = useCallback(
+    (list: GroupMemberItem[]) =>
+      shouldLimitVisibleMembers
+        ? list.filter((member) => member.roleLevel === 100 || member.roleLevel === 60)
+        : list,
+    [shouldLimitVisibleMembers],
+  );
 
   useEffect(() => {
     const currentConversationGroupID =
@@ -45,11 +62,10 @@ export default function useGroupMembers(props?: UseGroupMembersProps) {
     const groupMemberInfoChangedHandler = ({
       data: member,
     }: WSEvent<GroupMemberItem>) => {
-      if (member.groupID === latestFetchState.current?.groupMemberList[0]?.groupID) {
-        const idx = latestFetchState.current?.groupMemberList.findIndex(
+      if (member.groupID === latestFetchState.current.groupMemberList[0]?.groupID) {
+        const idx = latestFetchState.current.groupMemberList.findIndex(
           (item) => item.userID === member.userID,
-        ) ?? -1;
-        if (idx === -1 || !latestFetchState.current) return;
+        );
         const newMembers = [...latestFetchState.current.groupMemberList];
         newMembers[idx] = { ...member };
         setFetchState((state) => ({
@@ -65,7 +81,7 @@ export default function useGroupMembers(props?: UseGroupMembersProps) {
       }
       if (
         data.groupID ===
-        (groupID || latestFetchState.current?.groupMemberList[0]?.groupID)
+        (groupID || latestFetchState.current.groupMemberList[0]?.groupID)
       ) {
         getMemberData(true);
       }
@@ -94,8 +110,8 @@ export default function useGroupMembers(props?: UseGroupMembersProps) {
     async (keyword: string) => {
       const isReach = keyword === REACH_SEARCH_FLAG;
       if (
-        latestFetchState.current?.loading ||
-        (!latestFetchState.current?.hasMore && isReach)
+        latestFetchState.current.loading ||
+        (!latestFetchState.current.hasMore && isReach)
       )
         return;
       setFetchState((state) => ({
@@ -107,7 +123,7 @@ export default function useGroupMembers(props?: UseGroupMembersProps) {
       try {
         const { data } = await IMSDK.searchGroupMembers({
           groupID: groupID ?? currentConversationGroupID ?? "",
-          offset: isReach ? (latestFetchState.current?.searchOffset ?? 0) : 0,
+          offset: isReach ? latestFetchState.current.searchOffset : 0,
           count: 20,
           keywordList: [keyword === REACH_SEARCH_FLAG ? lastKeyword.current : keyword],
           isSearchMemberNickname: true,
@@ -115,9 +131,13 @@ export default function useGroupMembers(props?: UseGroupMembersProps) {
         });
 
         lastKeyword.current = keyword;
+        const filteredData = filterMembers(data);
         setFetchState((state) => ({
           ...state,
-          searchMemberList: [...(isReach ? state.searchMemberList : []), ...data],
+          searchMemberList: [
+            ...(isReach ? state.searchMemberList : []),
+            ...filteredData,
+          ],
           hasMore: data.length === state.count,
           searchOffset: state.searchOffset + 20,
         }));
@@ -143,7 +163,7 @@ export default function useGroupMembers(props?: UseGroupMembersProps) {
       if (!sourceID) return;
 
       if (
-        (latestFetchState.current?.loading || !latestFetchState.current?.hasMore) &&
+        (latestFetchState.current.loading || !latestFetchState.current.hasMore) &&
         !refresh
       )
         return;
@@ -155,13 +175,14 @@ export default function useGroupMembers(props?: UseGroupMembersProps) {
       try {
         const { data } = await IMSDK.getGroupMemberList({
           groupID: sourceID,
-          offset: refresh ? 0 : (latestFetchState.current?.offset ?? 0),
+          offset: refresh ? 0 : latestFetchState.current.offset,
           count: 20,
-          filter: 0,
+          filter: GroupMemberFilter.All,
         });
+        const filteredData = filterMembers(data);
         setFetchState((state) => ({
           ...state,
-          groupMemberList: [...(refresh ? [] : state.groupMemberList), ...data],
+          groupMemberList: [...(refresh ? [] : state.groupMemberList), ...filteredData],
           hasMore: data.length === state.count,
           offset: state.offset + 20,
           loading: false,
@@ -177,7 +198,7 @@ export default function useGroupMembers(props?: UseGroupMembersProps) {
         }));
       }
     },
-    [groupID],
+    [filterMembers, groupID, shouldLimitVisibleMembers],
   );
 
   const resetState = () => {

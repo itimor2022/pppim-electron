@@ -20,7 +20,6 @@ type FormFields = {
   verifyCode: string;
   password: string;
   password2: string;
-  email: string;
 };
 
 const ModifyForm = ({ loginMethod, setFormType }: ModifyFormProps) => {

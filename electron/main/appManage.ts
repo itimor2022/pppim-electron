@@ -68,17 +68,25 @@ export const performAppStartup = () => {
 
 export const setAppGlobalData = () => {
   const electronDistPath = join(__dirname, "../");
-  const distPath = join(electronDistPath, "../dist");
+  // 打包后: app/dist-electron, app/dist
+  // 开发时: dist-electron, dist
+  const appRoot = join(electronDistPath, "../");
+  const distPath = join(appRoot, "dist");
   const publicPath = isProd ? distPath : join(electronDistPath, "../public");
   const asarPath = join(distPath, "/../..");
+
+  console.log("[PathConfig] electronDistPath:", electronDistPath);
+  console.log("[PathConfig] appRoot:", appRoot);
+  console.log("[PathConfig] distPath:", distPath);
+  console.log("[PathConfig] publicPath:", publicPath);
 
   global.pathConfig = {
     electronDistPath,
     distPath,
     publicPath,
     asarPath,
-    logsPath: join(app.getPath("userData"), `/享聊Data/logs`),
-    autoUpdateCachePath: join(app.getPath("userData"), `/享聊Data/autoUpdateCache`),
+    logsPath: join(app.getPath("userData"), `/OpenIMData/logs`),
+    autoUpdateCachePath: join(app.getPath("userData"), `/OpenIMData/autoUpdateCache`),
     extraResourcesPath: join(asarPath, "/extraResources"),
     trayIcon: join(publicPath, `/icons/${isWin ? "icon.ico" : "tray.png"}`),
     emptyTrayIcon: join(publicPath, `/icons/${"empty_tray.png"}`),

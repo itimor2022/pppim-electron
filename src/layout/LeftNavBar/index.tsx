@@ -12,7 +12,6 @@ import { updateBusinessUserInfo } from "@/api/login";
 import contact_icon from "@/assets/images/nav/nav_bar_contact.png";
 import contact_icon_active from "@/assets/images/nav/nav_bar_contact_active.png";
 import message_icon from "@/assets/images/nav/nav_bar_message.png";
-import LogoutIcon from "@/assets/images/nav/nav_bar_logout.png";
 import message_icon_active from "@/assets/images/nav/nav_bar_message_active.png";
 import moments_icon from "@/assets/images/nav/nav_bar_moments.png";
 import moments_icon_active from "@/assets/images/nav/nav_bar_moments_active.png";
@@ -53,18 +52,10 @@ const NavList = [
   },
 ];
 
-const LogoutNavItem = {
-  icon: LogoutIcon,
-  icon_active: LogoutIcon, // 退出按钮不需要active状态
-  title: t("placeholder.logOut"),
-  path: "logout"
-};
-
 i18n.on("languageChanged", () => {
   NavList[0].title = t("placeholder.chat");
   NavList[1].title = t("placeholder.contact");
   NavList[2].title = t("placeholder.moments");
-  LogoutNavItem.title = t("placeholder.logOut");
 });
 
 const resizeFile = (file: File): Promise<File> =>
@@ -85,7 +76,7 @@ const resizeFile = (file: File): Promise<File> =>
 
 type NavItemType = (typeof NavList)[0];
 
-const NavItem = ({ nav: { icon, icon_active, title, path }, onLogout }: { nav: NavItemType; onLogout?: () => void }) => {
+const NavItem = ({ nav: { icon, icon_active, title, path } }: { nav: NavItemType }) => {
   const resolvedPath = useResolvedPath(path);
   const { navigator } = React.useContext(UNSAFE_NavigationContext);
   const toPathname = navigator.encodeLocation
@@ -110,10 +101,6 @@ const NavItem = ({ nav: { icon, icon_active, title, path }, onLogout }: { nav: N
   const selfInfo = useUserStore((state) => state.selfInfo);
 
   const tryNavigate = () => {
-    if (path === "logout" && onLogout) {
-      onLogout();
-      return;
-    }
     if (isActive) return;
     if (path === "/moments") {
       // if (window.electronAPI) {
@@ -187,11 +174,11 @@ const profileMenuList = [
     gap: true,
     idx: 1,
   },
-  // {
-  //   title: t("placeholder.about"),
-  //   gap: false,
-  //   idx: 2,
-  // },
+  {
+    title: t("placeholder.about"),
+    gap: false,
+    idx: 2,
+  },
   {
     title: t("placeholder.logOut"),
     gap: false,
@@ -202,8 +189,8 @@ const profileMenuList = [
 i18n.on("languageChanged", () => {
   profileMenuList[0].title = t("placeholder.myInfo");
   profileMenuList[1].title = t("placeholder.accountSetting");
-  // profileMenuList[2].title = t("placeholder.about");
-  profileMenuList[2].title = t("placeholder.logOut"); // 注意：序号改为2，因为about被注释了
+  profileMenuList[2].title = t("placeholder.about");
+  profileMenuList[3].title = t("placeholder.logOut");
 });
 
 const LeftNavBar = memo(() => {
@@ -321,7 +308,7 @@ const LeftNavBar = memo(() => {
       width={60}
       theme="light"
     >
-      <div className="mt-6 flex h-full flex-col items-center">
+      <div className="mt-6 flex flex-col items-center">
         <Popover
           content={ProfileContent}
           trigger="click"
@@ -339,15 +326,9 @@ const LeftNavBar = memo(() => {
           />
         </Popover>
 
-        <div className="flex flex-1 flex-col items-center">
-          {NavList.map((nav) => (
-            <NavItem nav={nav} key={nav.path} />
-          ))}
-        </div>
-
-        <div className="mb-6">
-          <NavItem nav={LogoutNavItem} onLogout={tryLogout} />
-        </div>
+        {NavList.map((nav) => (
+          <NavItem nav={nav} key={nav.path} />
+        ))}
       </div>
       <PersonalSettings ref={personalSettingsRef} />
       <About ref={aboutRef} />
