@@ -7,6 +7,7 @@ import invite_header from "@/assets/images/chatSetting/invite_header.png";
 import search from "@/assets/images/chatSetting/search.png";
 import { useConversationStore } from "@/store";
 import emitter from "@/utils/events";
+import { getDisplayMemberCount } from "@/utils/group";
 
 const GroupMemberListHeader = ({
   back2Settings,
@@ -17,6 +18,11 @@ const GroupMemberListHeader = ({
   searchMemebers: (keyword: string) => void;
   updateSearching: (val: boolean) => void;
 }) => {
+  const currentGroupInfo = useConversationStore((state) => state.currentGroupInfo);
+  const displayMemberCount = getDisplayMemberCount(
+    currentGroupInfo?.memberCount,
+    currentGroupInfo?.ex,
+  );
   const [searchState, setSearchState] = useState({
     keyword: "",
     visible: false,
@@ -30,7 +36,10 @@ const GroupMemberListHeader = ({
           rev={undefined}
           onClick={back2Settings}
         />
-        <div>{t("placeholder.memberList")}</div>
+        <div>
+          {t("placeholder.memberList")}
+          <span className="ml-1 text-xs text-[var(--sub-text)]">{`(${displayMemberCount})`}</span>
+        </div>
       </div>
       {searchState.visible ? (
         <div className="mr-4 flex items-center transition-opacity">

@@ -1,6 +1,7 @@
 import { GroupItem } from "open-im-sdk-wasm/lib/types/entity";
 
 import OIMAvatar from "@/components/OIMAvatar";
+import { getDisplayMemberCount } from "@/utils/group";
 
 const GroupListItem = ({
   source,
@@ -9,6 +10,8 @@ const GroupListItem = ({
   source: GroupItem;
   showGroupCard: (group: GroupItem) => void;
 }) => {
+  const memberCount = getDisplayMemberCount(source.memberCount, source.ex);
+
   return (
     <div
       className="flex flex-row rounded-md px-3.5 py-3 transition-colors hover:bg-[var(--primary-active)]"
@@ -17,7 +20,7 @@ const GroupListItem = ({
       <OIMAvatar src={source?.faceURL} isgroup />
       <div className="ml-3">
         <p className="text-base">{source.groupName}</p>
-        <p className="text-xs text-[#8E9AB0FF]">{source.memberCount}</p>
+        <p className="text-xs text-[#8E9AB0FF]">{memberCount}</p>
       </div>
     </div>
   );
