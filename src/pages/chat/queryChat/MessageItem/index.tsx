@@ -1,4 +1,4 @@
-import { useInViewport, useRequest } from "ahooks";
+import { useInViewport } from "ahooks";
 import { Checkbox, Popover } from "antd";
 import { CheckboxChangeEvent } from "antd/es/checkbox";
 import clsx from "clsx";
@@ -59,6 +59,34 @@ const components: Record<number, FC<IMessageItemProps>> = {
   [MessageType.GroupAnnouncementUpdated]: AnnouncementRenderer,
 };
 
+const pendingGroupReadReceipts = new Map<string, Set<string>>();
+let groupReadReceiptTimer: ReturnType<typeof setTimeout> | undefined;
+
+const flushGroupReadReceipts = () => {
+  groupReadReceiptTimer = undefined;
+  pendingGroupReadReceipts.forEach((clientMsgIDSet, conversationID) => {
+    const clientMsgIDList = Array.from(clientMsgIDSet);
+    if (conversationID && clientMsgIDList.length) {
+      IMSDK.sendGroupMessageReadReceipt({
+        conversationID,
+        clientMsgIDList,
+      }).catch(() => undefined);
+    }
+  });
+  pendingGroupReadReceipts.clear();
+};
+
+const queueGroupReadReceipt = (conversationID: string, clientMsgID: string) => {
+  if (!conversationID || !clientMsgID) return;
+  const clientMsgIDSet =
+    pendingGroupReadReceipts.get(conversationID) ?? new Set<string>();
+  clientMsgIDSet.add(clientMsgID);
+  pendingGroupReadReceipts.set(conversationID, clientMsgIDSet);
+  if (!groupReadReceiptTimer) {
+    groupReadReceiptTimer = setTimeout(flushGroupReadReceipts, 200);
+  }
+};
+
 const MessageItem: FC<IMessageItemProps> = ({
   message,
   disabled,
@@ -87,24 +115,11 @@ const MessageItem: FC<IMessageItemProps> = ({
     root: document.getElementById("chat-main"),
   });
 
-  const { runAsync: markGroupMessageAsRead, loading: markGroupMessageAsReadLoading } =
-    useRequest(IMSDK.sendGroupMessageReadReceipt, {
-      manual: true,
-    });
-
   useEffect(() => {
     if (disabled || isSender || !inViewport) return;
     updateMessageAppendState();
     updateMessageReadState();
-  }, [
-    inViewport,
-    isSender,
-    disabled,
-    message.isAppend,
-    message.isRead,
-    message.seq,
-    markGroupMessageAsReadLoading,
-  ]);
+  }, [inViewport, isSender, disabled, message.isAppend, message.isRead, message.seq]);
 
   const onCheckChange = (e: CheckboxChangeEvent) => {
     updateMessage({ ...message, checked: e.target.checked });
@@ -130,7 +145,6 @@ const MessageItem: FC<IMessageItemProps> = ({
 
   const updateMessageReadState = () => {
     if (
-      markGroupMessageAsReadLoading ||
       message.isRead ||
       message.seq === 0 ||
       message.contentType === MessageType.GroupAnnouncementUpdated
@@ -138,10 +152,7 @@ const MessageItem: FC<IMessageItemProps> = ({
       return;
 
     if (message.groupID) {
-      markGroupMessageAsRead({
-        conversationID: conversationID ?? "",
-        clientMsgIDList: [message.clientMsgID],
-      });
+      queueGroupReadReceipt(conversationID ?? "", message.clientMsgID);
     }
 
     updateMessage({

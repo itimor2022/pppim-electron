@@ -1,6 +1,6 @@
 import { CloseOutlined } from "@ant-design/icons";
 import { useKeyPress, useRequest } from "ahooks";
-import { Popover } from "antd";
+import { Popover, Tabs } from "antd";
 import clsx from "clsx";
 import { CbEvents } from "open-im-sdk-wasm";
 import { SessionType } from "open-im-sdk-wasm";
@@ -87,6 +87,7 @@ const ReadedList = memo(
     const { t } = useTranslation();
     const [readedData, setReadedData] = useState<GroupMemberItem[]>([]);
     const [unReadData, setUnReadData] = useState<GroupMemberItem[]>([]);
+    const [activeKey, setActiveKey] = useState(unReadCount > 0 ? "unread" : "readed");
     const hasMoreReaded = useRef(true);
     const hasMoreUnread = useRef(true);
     const conversationID =
@@ -159,10 +160,6 @@ const ReadedList = memo(
           ),
         );
       };
-      setTimeout(() => {
-        getReadedMembers();
-        getUnreadMembers();
-      }, 100);
       IMSDK.on(CbEvents.OnRecvGroupReadReceipt, groupMessageHasReadedHander);
       return () => {
         IMSDK.off(CbEvents.OnRecvGroupReadReceipt, groupMessageHasReadedHander);
@@ -170,6 +167,14 @@ const ReadedList = memo(
         cancelGetUnreadMembers();
       };
     }, []);
+
+    useEffect(() => {
+      if (activeKey === "readed") {
+        getMoreReadedList();
+      } else {
+        getMoreUnReadList();
+      }
+    }, [activeKey]);
 
     const getMoreReadedList = () => {
       if (readedLoading || !hasMoreReaded.current || !conversationID) return;
@@ -193,45 +198,45 @@ const ReadedList = memo(
             onClick={closeOverlay}
           />
         </div>
-        <div className="flex flex-1 px-2">
-          <div className="flex flex-1 flex-col">
-            <div className="flex items-center px-4 py-2.5">
-              <span className="mr-1 text-[var(--primary)]">{unReadCount}</span>
-              {t("placeholder.unread")}
-            </div>
-            {Boolean(unReadData.length) && (
-              <Virtuoso
-                className="flex-1 overflow-x-hidden"
-                data={unReadData}
-                computeItemKey={(_, member) => member.userID}
-                endReached={getMoreUnReadList}
-                components={{
-                  Footer: () => (unreadLoading ? <div>loading...</div> : null),
-                }}
-                itemContent={(_, member) => <MemberItem member={member} />}
-              />
-            )}
-          </div>
-          <div className="w-3"></div>
-          <div className="flex flex-1 flex-col">
-            <div className="flex items-center px-4 py-2.5">
-              <span className="mr-1 text-[var(--primary)]">{readedCount}</span>
-              {t("placeholder.isRead")}
-            </div>
-            {Boolean(readedData.length) && (
-              <Virtuoso
-                className="flex-1 overflow-x-hidden"
-                data={readedData ?? []}
-                computeItemKey={(_, member) => member.userID}
-                endReached={getMoreReadedList}
-                components={{
-                  Header: () => (readedLoading ? <div>loading...</div> : null),
-                }}
-                itemContent={(_, member) => <MemberItem member={member} />}
-              />
-            )}
-          </div>
-        </div>
+        <Tabs
+          className="flex min-h-0 flex-1 flex-col px-2"
+          activeKey={activeKey}
+          onChange={setActiveKey}
+          items={[
+            {
+              key: "unread",
+              label: `${t("placeholder.unread")} ${unReadCount}`,
+              children: (
+                <Virtuoso
+                  className="h-52 overflow-x-hidden"
+                  data={unReadData}
+                  computeItemKey={(_, member) => member.userID}
+                  endReached={getMoreUnReadList}
+                  components={{
+                    Footer: () => (unreadLoading ? <div>loading...</div> : null),
+                  }}
+                  itemContent={(_, member) => <MemberItem member={member} />}
+                />
+              ),
+            },
+            {
+              key: "readed",
+              label: `${t("placeholder.isRead")} ${readedCount}`,
+              children: (
+                <Virtuoso
+                  className="h-52 overflow-x-hidden"
+                  data={readedData ?? []}
+                  computeItemKey={(_, member) => member.userID}
+                  endReached={getMoreReadedList}
+                  components={{
+                    Header: () => (readedLoading ? <div>loading...</div> : null),
+                  }}
+                  itemContent={(_, member) => <MemberItem member={member} />}
+                />
+              ),
+            },
+          ]}
+        />
       </div>
     );
   },
