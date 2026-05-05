@@ -1,3 +1,4 @@
+import type { GroupMemberItem } from "open-im-sdk-wasm/lib/types/entity";
 import { v4 as uuidv4 } from "uuid";
 
 import { getApiUrl, SDK_VERSION } from "@/config";
@@ -29,3 +30,9 @@ export const uploadLogs = async (fileURLs: FileItem[]) => {
     },
   });
 };
+
+export const getServerGroupMembersInfo = (params: {
+  groupID: string;
+  userIDs: string[];
+}) =>
+  request.post<{ members: GroupMemberItem[] }>("/group/get_group_members_info", params);

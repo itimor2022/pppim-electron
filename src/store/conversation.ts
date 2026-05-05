@@ -8,6 +8,7 @@ import {
 } from "open-im-sdk-wasm/lib/types/entity";
 import { create } from "zustand";
 
+import { getServerGroupMembersInfo } from "@/api/imApi";
 import { IMSDK } from "@/layout/MainContentWrap";
 import { feedbackToast } from "@/utils/common";
 import { conversationSort, isGroupSession } from "@/utils/imCommon";
@@ -148,6 +149,7 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
   },
   getCurrentMemberInGroupByReq: async (groupID: string) => {
     let memberInfo: GroupMemberItem | undefined;
+    let localMemberError: unknown;
     const selfID = useUserStore.getState().selfInfo.userID;
     set(() => ({ currentMemberInGroupLoading: true }));
     try {
@@ -157,9 +159,23 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
       });
       memberInfo = data[0];
     } catch (error) {
-      feedbackToast({ error, msg: t("toast.getGroupMemberFailed") });
-      set(() => ({ currentMemberInGroupLoading: false }));
-      return;
+      localMemberError = error;
+    }
+    if (!memberInfo) {
+      try {
+        const { data } = await getServerGroupMembersInfo({
+          groupID,
+          userIDs: [selfID],
+        });
+        memberInfo = data.members?.[0];
+      } catch (error) {
+        feedbackToast({
+          error: localMemberError ?? error,
+          msg: t("toast.getGroupMemberFailed"),
+        });
+        set(() => ({ currentMemberInGroupLoading: false }));
+        return;
+      }
     }
     const currentGroupID = get().currentConversation?.groupID;
     if (currentGroupID !== groupID) {
