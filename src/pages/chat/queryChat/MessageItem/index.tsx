@@ -10,7 +10,12 @@ import { useTranslation } from "react-i18next";
 import OIMAvatar from "@/components/OIMAvatar";
 import { useConversationToggle } from "@/hooks/useConversationToggle";
 import { IMSDK } from "@/layout/MainContentWrap";
-import { ExMessageItem, useMessageStore, useUserStore } from "@/store";
+import {
+  ExMessageItem,
+  useConversationStore,
+  useMessageStore,
+  useUserStore,
+} from "@/store";
 import emitter from "@/utils/events";
 import { formatMessageTime } from "@/utils/imCommon";
 
@@ -61,6 +66,7 @@ const components: Record<number, FC<IMessageItemProps>> = {
 
 const pendingGroupReadReceipts = new Map<string, Set<string>>();
 let groupReadReceiptTimer: ReturnType<typeof setTimeout> | undefined;
+const LARGE_GROUP_READ_RECEIPT_MEMBER_LIMIT = 1000;
 
 const flushGroupReadReceipts = () => {
   groupReadReceiptTimer = undefined;
@@ -102,7 +108,13 @@ const MessageItem: FC<IMessageItemProps> = ({
   const isCheckMode = useMessageStore((state) => state.isCheckMode);
   const jumpClientMsgID = useMessageStore((state) => state.jumpClientMsgID);
   const updateMessage = useMessageStore((state) => state.updateOneMessage);
+  const currentGroupMemberCount = useConversationStore(
+    (state) => state.currentGroupInfo?.memberCount ?? 0,
+  );
   const MessageRenderComponent = components[message.contentType] || CatchMessageRender;
+  const isLargeGroupReadReceiptDisabled =
+    Boolean(message.groupID) &&
+    currentGroupMemberCount >= LARGE_GROUP_READ_RECEIPT_MEMBER_LIMIT;
 
   // locale re render
   useUserStore((state) => state.appSettings.locale);
@@ -151,7 +163,7 @@ const MessageItem: FC<IMessageItemProps> = ({
     )
       return;
 
-    if (message.groupID) {
+    if (message.groupID && !isLargeGroupReadReceiptDisabled) {
       queueGroupReadReceipt(conversationID ?? "", message.clientMsgID);
     }
 
@@ -169,7 +181,11 @@ const MessageItem: FC<IMessageItemProps> = ({
   const isAnnouncement = message.contentType === MessageType.GroupAnnouncementUpdated;
   const isCustomMessage = message.contentType === MessageType.CustomMessage;
   const showMessageReadState =
-    isSender && messageIsSuccess && !isAnnouncement && !isCustomMessage;
+    isSender &&
+    messageIsSuccess &&
+    !isAnnouncement &&
+    !isCustomMessage &&
+    !isLargeGroupReadReceiptDisabled;
   const canShowMessageMenu = !disabled && !isAnnouncement;
 
   return (
