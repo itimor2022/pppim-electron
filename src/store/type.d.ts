@@ -41,6 +41,10 @@ export interface AppConfig {
   showOnlinePlatform: number | string;
   showUserOnlineStatus: number | string;
   showGroupAllMembers: number | string;
+  announcementEnabled?: number | string | boolean;
+  announcementType?: "text" | "image";
+  announcementContent?: string;
+  revokeMessageDurationMinutes?: number | string;
 }
 
 export interface UpdateMessaggeBaseInfoParams {

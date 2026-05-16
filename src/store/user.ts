@@ -65,6 +65,9 @@ export const useUserStore = create<UserStore>()((set, get) => ({
       if (config.showGroupAllMembers === undefined) {
         config.showGroupAllMembers = 1;
       }
+      if (!Number(config.revokeMessageDurationMinutes)) {
+        config.revokeMessageDurationMinutes = 5;
+      }
     } catch (error) {
       console.error("get app config err");
     }

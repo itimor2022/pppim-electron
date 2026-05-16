@@ -121,6 +121,9 @@ const MessageMenuContent = ({
   const deleteOneMessage = useMessageStore((state) => state.deleteOneMessage);
   const updateQuoteMessage = useConversationStore((state) => state.updateQuoteMessage);
   const addRevokedMessage = useConversationStore((state) => state.addRevokedMessage);
+  const revokeMessageDurationMinutes = useUserStore((state) =>
+    Number(state.appConfig.revokeMessageDurationMinutes ?? 5),
+  );
 
   const [_, copyToClipboard] = useCopyToClipboard();
   const { isNomal, isAdmin } = useCurrentMemberRole();
@@ -304,7 +307,12 @@ const MessageMenuContent = ({
 
   const senderIsOwner = message.sendID === ownerUserID;
   const isSender = message.sendID === selfUserID;
-  const moreThanRevokeLimit = message.sendTime < Date.now() - 5 * 60 * 1000;
+  const revokeLimitMinutes =
+    Number.isFinite(revokeMessageDurationMinutes) && revokeMessageDurationMinutes > 0
+      ? revokeMessageDurationMinutes
+      : 5;
+  const moreThanRevokeLimit =
+    message.sendTime < Date.now() - revokeLimitMinutes * 60 * 1000;
   const messageIsSuccess = message.status === MessageStatus.Succeed;
 
   return (
