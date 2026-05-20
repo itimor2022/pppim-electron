@@ -27,7 +27,9 @@ const getEmojiDataSource = () => {
   if (electronPublicPath) {
     return `${electronPublicPath}/emojis.json`;
   }
-  return new URL("emojis.json", window.location.origin + import.meta.env.BASE_URL).toString();
+  const basePath = import.meta.env.BASE_URL || "./";
+  const normalizedBasePath = basePath.endsWith("/") ? basePath : `${basePath}/`;
+  return `${normalizedBasePath}emojis.json`;
 };
 
 const emojiPicker = new Picker({
