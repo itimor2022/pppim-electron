@@ -62,9 +62,15 @@ const ApplicationItem = ({
   };
 
   const loadingWrap = async (isAgree: boolean) => {
+    if (loading) {
+      return;
+    }
     setLoading(true);
-    await (isAgree ? onAccept(source) : onReject(source));
-    setLoading(false);
+    try {
+      await (isAgree ? onAccept(source) : onReject(source));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -93,6 +99,7 @@ const ApplicationItem = ({
               <Button
                 block={true}
                 size="small"
+                disabled={loading}
                 onClick={() => loadingWrap(false)}
                 className="!h-full !rounded-md border-2 border-[#0089FF] text-[#0089FF]"
               >
@@ -104,6 +111,7 @@ const ApplicationItem = ({
                 block={true}
                 size="small"
                 type="primary"
+                disabled={loading}
                 className="!h-full !rounded-md bg-[#0289fa]"
                 onClick={() => loadingWrap(true)}
               >

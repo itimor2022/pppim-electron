@@ -173,14 +173,16 @@ export const useContactStore = create<ContactStore>()((set, get) => ({
   updateRecvGroupApplication: async (application: GroupApplicationItem) => {
     let tmpList = [...get().recvGroupApplicationList];
     let isHandleResultUpdate = false;
-    const idx = tmpList.findIndex((a) => a.userID === application.userID);
+    const idx = tmpList.findIndex(
+      (a) => a.userID === application.userID && a.groupID === application.groupID,
+    );
     if (idx < 0) {
       tmpList = [...tmpList, application];
     } else {
       isHandleResultUpdate = true;
       tmpList[idx] = { ...application };
     }
-    if (idx < 0 || application.handleResult === ApplicationHandleResult.Unprocessed) {
+    if (idx < 0 || isHandleResultUpdate) {
       const accessedGroupApplications = await getAccessedGroupApplication();
       const unHandleGroupApplicationCount = tmpList.filter(
         (application) =>
@@ -204,7 +206,9 @@ export const useContactStore = create<ContactStore>()((set, get) => ({
   },
   updateSendGroupApplication: (application: GroupApplicationItem) => {
     let tmpList = [...get().sendGroupApplicationList];
-    const idx = tmpList.findIndex((a) => a.groupID === application.groupID);
+    const idx = tmpList.findIndex(
+      (a) => a.userID === application.userID && a.groupID === application.groupID,
+    );
     if (idx < 0) {
       tmpList = [...tmpList, application];
     } else {

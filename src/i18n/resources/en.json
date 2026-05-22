@@ -43,6 +43,7 @@
     "unfriendFailed": "Failed to unfriend!",
     "getMessageListFailed": "Failed to get message list!",
     "sendApplicationFailed": "Failed to send request!",
+    "groupApplicationHandled": "This group request has already been processed",
     "loading": "Logging in...",
     "syncing": "Syncing...",
     "syncFailed": "Sync failed!",

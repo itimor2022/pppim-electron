@@ -43,6 +43,7 @@
     "unfriendFailed": "解除好友失败！",
     "getMessageListFailed": "获取消息列表失败！",
     "sendApplicationFailed": "发送请求失败！",
+    "groupApplicationHandled": "该群申请已处理",
     "loading": "登录中...",
     "syncing": "同步中...",
     "syncFailed": "同步失败！",

@@ -23,6 +23,12 @@ export const GroupNotifications = () => {
   const sendGroupApplicationList = useContactStore(
     (state) => state.sendGroupApplicationList,
   );
+  const updateRecvGroupApplication = useContactStore(
+    (state) => state.updateRecvGroupApplication,
+  );
+  const getRecvGroupApplicationListByReq = useContactStore(
+    (state) => state.getRecvGroupApplicationListByReq,
+  );
 
   const groupApplicationList = sortArray(
     recvGroupApplicationList.concat(sendGroupApplicationList),
@@ -38,29 +44,73 @@ export const GroupNotifications = () => {
     setAccessedGroupApplication(accessedGroupApplications).then(calcApplicationBadge);
   }, [recvGroupApplicationList]);
 
-  const onAccept = useCallback(async (application: GroupApplicationItem) => {
-    try {
-      await IMSDK.acceptGroupApplication({
-        groupID: application.groupID,
-        fromUserID: application.userID,
-        handleMsg: "",
-      });
-    } catch (error) {
-      feedbackToast({ error });
-    }
-  }, []);
+  const onAccept = useCallback(
+    async (application: GroupApplicationItem) => {
+      if (application.handleResult !== ApplicationHandleResult.Unprocessed) {
+        feedbackToast({
+          msg: t("toast.groupApplicationHandled"),
+          error: t("toast.groupApplicationHandled"),
+        });
+        return;
+      }
+      try {
+        await IMSDK.acceptGroupApplication({
+          groupID: application.groupID,
+          fromUserID: application.userID,
+          handleMsg: "",
+        });
+        await updateRecvGroupApplication({
+          ...application,
+          handleResult: ApplicationHandleResult.Agree,
+        });
+      } catch (error) {
+        if (isGroupApplicationHandled(error)) {
+          feedbackToast({
+            msg: t("toast.groupApplicationHandled"),
+            error,
+          });
+          await getRecvGroupApplicationListByReq();
+          return;
+        }
+        feedbackToast({ error });
+      }
+    },
+    [getRecvGroupApplicationListByReq, t, updateRecvGroupApplication],
+  );
 
-  const onReject = useCallback(async (application: GroupApplicationItem) => {
-    try {
-      await IMSDK.refuseGroupApplication({
-        groupID: application.groupID,
-        fromUserID: application.userID,
-        handleMsg: "",
-      });
-    } catch (error) {
-      feedbackToast({ error });
-    }
-  }, []);
+  const onReject = useCallback(
+    async (application: GroupApplicationItem) => {
+      if (application.handleResult !== ApplicationHandleResult.Unprocessed) {
+        feedbackToast({
+          msg: t("toast.groupApplicationHandled"),
+          error: t("toast.groupApplicationHandled"),
+        });
+        return;
+      }
+      try {
+        await IMSDK.refuseGroupApplication({
+          groupID: application.groupID,
+          fromUserID: application.userID,
+          handleMsg: "",
+        });
+        await updateRecvGroupApplication({
+          ...application,
+          handleResult: ApplicationHandleResult.Reject,
+        });
+      } catch (error) {
+        if (isGroupApplicationHandled(error)) {
+          feedbackToast({
+            msg: t("toast.groupApplicationHandled"),
+            error,
+          });
+          await getRecvGroupApplicationListByReq();
+          return;
+        }
+        feedbackToast({ error });
+      }
+    },
+    [getRecvGroupApplicationListByReq, t, updateRecvGroupApplication],
+  );
 
   return (
     <div className="flex h-full w-full flex-col bg-white">
@@ -73,7 +123,7 @@ export const GroupNotifications = () => {
           data={groupApplicationList}
           itemContent={(_, item) => (
             <ApplicationItem
-              key={`${item.userID}${item.reqTime}`}
+              key={`${item.groupID}_${item.userID}_${item.reqTime}`}
               source={item}
               currentUserID={currentUserID}
               onAccept={onAccept as AccessFunction}
@@ -98,4 +148,19 @@ const sortArray = (list: GroupApplicationItem[]) => {
     return 0;
   });
   return list;
+};
+
+const isGroupApplicationHandled = (error: unknown) => {
+  const typedError = error as {
+    code?: number | string;
+    errCode?: number | string;
+    errDlt?: string;
+    errMsg?: string;
+  };
+  const errorCode = Number(typedError?.errCode ?? typedError?.code);
+  return (
+    errorCode === 1206 ||
+    typedError?.errMsg === "GroupRequestHandled" ||
+    typedError?.errDlt?.includes("GroupRequestHandled") === true
+  );
 };
