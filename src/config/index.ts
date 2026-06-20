@@ -12,7 +12,7 @@ export const getWsUrl = () => localStorage.getItem("wsUrl") || WS_URL;
 export const getApiUrl = () => localStorage.getItem("apiUrl") || API_URL;
 export const getChatUrl = () => localStorage.getItem("chatUrl") || CHAT_URL;
 
-export const APP_VERSION = "享聊 3.5.1";
+export const APP_VERSION = "民之心 3.5.1";
 export const APP_VERSION_CODE = 350;
 export const SDK_VERSION = "SDK v3.5.1-alpha.3-e-v1.1.4";
 export const CHECK_UPDATE_PREFIX =
