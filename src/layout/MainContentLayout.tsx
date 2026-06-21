@@ -3,9 +3,6 @@ import { Layout, Spin } from "antd";
 import { t } from "i18next";
 import { Outlet, useMatches, useNavigate } from "react-router-dom";
 
-import AnnouncementModal from "@/components/AnnouncementModal";
-import { useUserStore } from "@/store";
-
 import LeftNavBar from "./LeftNavBar";
 import TopSearchBar from "./TopSearchBar";
 import { useGlobalEvent } from "./useGlobalEvents";
@@ -14,7 +11,6 @@ export const MainContentLayout = () => {
   const matches = useMatches();
   const navigate = useNavigate();
   const [connectState] = useGlobalEvent();
-  const appConfig = useUserStore((state) => state.appConfig);
 
   useMount(() => {
     const isRoot = !matches.find((item) => item.pathname !== "/");
@@ -26,21 +22,16 @@ export const MainContentLayout = () => {
     }
   });
 
-  const loadingTip = connectState.isLogining ? t("toast.loading") : t("toast.syncing");
+  const loadingTip = t("toast.loading");
 
   return (
-    <Spin
-      className="!max-h-none"
-      spinning={connectState.isLogining || connectState.isSyncing}
-      tip={loadingTip}
-    >
-      <Layout className="h-full">
+    <Spin className="!max-h-none" spinning={connectState.isLogining} tip={loadingTip}>
+      <Layout className="relative h-full overflow-hidden !bg-[var(--page-bg)]">
         <TopSearchBar />
-        <Layout>
+        <Layout className="h-full flex-row !bg-[var(--page-bg)]">
           <LeftNavBar />
           <Outlet />
         </Layout>
-        <AnnouncementModal config={appConfig} />
       </Layout>
     </Spin>
   );
