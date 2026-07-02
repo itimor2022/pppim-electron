@@ -171,10 +171,10 @@ const UserCardModal: ForwardRefRenderFunction<
             title: t("placeholder.birth"),
             value: info.birth ? dayjs(info.birth).format("YYYY/M/D") : "-",
           },
-          {
-            title: t("placeholder.phoneNumber"),
-            value: info.phoneNumber || "-",
-          },
+          // {
+          //   title: t("placeholder.phoneNumber"),
+          //   value: info.phoneNumber || "-",
+          // },
           {
             title: t("placeholder.email"),
             value: info.email || "-",
