@@ -103,11 +103,17 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
     }
   }, [countdown]);
 
+  const isEmail = loginMethod === "email";
+
   const onFinish = (fields: FormFields) => {
     if (registerForm === 0) {
       const pattern = /^1\d{10}$/;
       if (fields.phoneNumber && !pattern.test(fields.phoneNumber)) {
         return message.error(t("toast.inputCorrectPhoneNumber"));
+      }
+      if (isEmail) {
+        setRegisterForm(2);
+        return;
       }
       sendSms(
         {
@@ -122,8 +128,9 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
           },
         },
       );
+      return;
     }
-    const verifyCode = code.join("");
+    const verifyCode = isEmail ? "" : code.join("");
 
     if (registerForm === 1) {
       if (!verifyCode) return;
@@ -139,6 +146,7 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
           },
         },
       );
+      return;
     }
     if (registerForm === 2) {
       setAreaCode(fields.areaCode);
@@ -151,6 +159,7 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
 
       register(
         {
+          invitationCode: fields.invitationCode,
           verifyCode,
           autoLogin: true,
           user: {
@@ -195,8 +204,6 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
     setFormType(0);
     form.resetFields();
   };
-
-  const isEmail = loginMethod === "email";
 
   const verifyTitile = isEmail
     ? "placeholder.verifyPhoneNumber"
@@ -246,7 +253,10 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
           <Form.Item
             label={t("placeholder.email")}
             name="email"
-            rules={[{ type: "email", message: t("toast.inputCorrectEmail") }]}
+            rules={[
+              { required: true, message: t("toast.inputEmail") },
+              { type: "email", message: t("toast.inputCorrectEmail") },
+            ]}
             hidden={registerForm !== 0}
           >
             <Input allowClear placeholder={t("toast.inputEmail")} />
@@ -257,6 +267,11 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
           className="mb-24"
           label={t("placeholder.invitationCode")}
           name="invitationCode"
+          rules={
+            needInvitationCode
+              ? [{ required: true, message: t("toast.inputInvitationCode") }]
+              : undefined
+          }
           hidden={registerForm !== 0}
         >
           <Input
