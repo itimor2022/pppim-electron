@@ -1,11 +1,11 @@
 import { LeftOutlined } from "@ant-design/icons";
-import { App, Button, Form, Input, InputRef, Select, Space } from "antd";
+import { App, Button, Form, Input, Select, Space } from "antd";
 import { t } from "i18next";
 import md5 from "md5";
-import React, { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { BusinessAllowType, useRegister, useSendSms, useVerifyCode } from "@/api/login";
+import { BusinessAllowType, useRegister } from "@/api/login";
 import { useUserStore } from "@/store";
 import { setAreaCode, setEmail, setIMProfile, setPhoneNumber } from "@/utils/storage";
 
@@ -32,8 +32,6 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
   const { message } = App.useApp();
   const [form] = Form.useForm<FormFields>();
   const navigate = useNavigate();
-  const { mutate: sendSms } = useSendSms();
-  const { mutate: verifySmsCode } = useVerifyCode();
   const { mutate: register } = useRegister();
 
   const needInvitationCode = useUserStore(
@@ -44,65 +42,6 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
   // 0login 1resetPassword 2register
   const [registerForm, setRegisterForm] = useState(0);
 
-  const [code, setCode] = useState(["", "", "", "", "", ""]);
-  const inputRefs = useRef<InputRef[]>([]);
-  const handleInputChange = (
-    index: number,
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => {
-    const value = event.target.value;
-    const newCode = [...code];
-
-    if (value.length === 1) {
-      newCode[index] = value;
-      setCode(newCode);
-
-      if (index < code.length - 1) {
-        inputRefs.current[index + 1].focus();
-      }
-    } else if (value.length === 0) {
-      const newCode = [...code];
-      newCode[index] = "";
-      setCode(newCode);
-    }
-
-    const isFilled = newCode.every((input) => input.length > 0);
-    if (isFilled) {
-      form.submit();
-    }
-  };
-  const handleInputKeyUp = (index: number, event: React.KeyboardEvent) => {
-    const keyPressed = event.keyCode || event.which;
-
-    if (keyPressed === 8 && index > 0) {
-      const newCode = [...code];
-      newCode[index - 1] = "";
-      setCode(newCode);
-      inputRefs.current[index - 1].focus();
-    }
-
-    if (keyPressed === 8 || keyPressed === 46) {
-      const newCode = [...code];
-      newCode[index] = "";
-      setCode(newCode);
-    }
-  };
-
-  const [countdown, setCountdown] = useState(0);
-  useEffect(() => {
-    if (countdown > 0) {
-      const timer = setTimeout(() => {
-        setCountdown((prevCountdown) => prevCountdown - 1);
-        if (countdown === 1) {
-          clearTimeout(timer);
-          setCountdown(0);
-        }
-      }, 1000);
-
-      return () => clearTimeout(timer);
-    }
-  }, [countdown]);
-
   const isEmail = loginMethod === "email";
 
   const onFinish = (fields: FormFields) => {
@@ -111,43 +50,12 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
       if (fields.phoneNumber && !pattern.test(fields.phoneNumber)) {
         return message.error(t("toast.inputCorrectPhoneNumber"));
       }
-      if (isEmail) {
-        setRegisterForm(2);
-        return;
-      }
-      sendSms(
-        {
-          usedFor: 1,
-          ...fields,
-        },
-        {
-          onSuccess() {
-            setCountdown(60);
-            setRegisterForm(1);
-            setTimeout(() => inputRefs.current[0].focus());
-          },
-        },
-      );
+      setRegisterForm(2);
       return;
     }
-    const verifyCode = isEmail ? "" : code.join("");
 
-    if (registerForm === 1) {
-      if (!verifyCode) return;
-      verifySmsCode(
-        {
-          ...fields,
-          verifyCode,
-          usedFor: 1,
-        },
-        {
-          onSuccess() {
-            setRegisterForm(2);
-          },
-        },
-      );
-      return;
-    }
+    const verifyCode = "666666";
+
     if (registerForm === 2) {
       setAreaCode(fields.areaCode);
       if (fields.phoneNumber) {
@@ -183,35 +91,10 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
     }
   };
 
-  const sendSmsHandle = () => {
-    sendSms(
-      {
-        email: form.getFieldValue("email") as string,
-        phoneNumber: form.getFieldValue("phoneNumber") as string,
-        areaCode: form.getFieldValue("areaCode") as string,
-        invitationCode: form.getFieldValue("invitationCode") as string,
-        usedFor: 1,
-      },
-      {
-        onSuccess() {
-          setCountdown(60);
-        },
-      },
-    );
-  };
-
   const back = () => {
     setFormType(0);
     form.resetFields();
   };
-
-  const verifyTitile = isEmail
-    ? "placeholder.verifyPhoneNumber"
-    : "placeholder.verifyEmail";
-
-  const receiver = isEmail
-    ? (form.getFieldValue("email") as string)
-    : `${form.getFieldValue("areaCode")} ${form.getFieldValue("phoneNumber")}`;
 
   return (
     <div className="flex flex-col justify-between">
@@ -221,13 +104,7 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
       </div>
       <div className="mt-4 text-2xl font-medium">
         {registerForm === 0 && <span>{t("placeholder.register")}</span>}
-        {registerForm === 1 && <span>{t(verifyTitile)}</span>}
         {registerForm === 2 && <span>{t("placeholder.setInfo")}</span>}
-      </div>
-      <div className="mt-4 tracking-wider text-gray-400" hidden={registerForm !== 1}>
-        <span>{t("placeholder.pleaseEnterSendTo")}</span>
-        <span className=" text-blue-600">{receiver}</span>
-        <span>{t("placeholder.verifyValidity")}</span>
       </div>
       <Form
         form={form}
@@ -282,38 +159,6 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
             }`}
             className="w-full"
           />
-        </Form.Item>
-
-        <Form.Item label="" hidden={registerForm !== 1} className="mb-14 mt-8">
-          <div className="flex flex-row items-center justify-center">
-            {code.map((digit, index) => (
-              <Input
-                key={index}
-                ref={(input: InputRef) => (inputRefs.current[index] = input)}
-                type="text"
-                maxLength={1}
-                value={digit}
-                onChange={(e) => handleInputChange(index, e)}
-                onKeyUp={(e) => handleInputKeyUp(index, e)}
-                className="mr-1 h-11 w-11 text-center text-2xl"
-              />
-            ))}
-          </div>
-          <div className="mt-4 text-gray-400">
-            {countdown > 0 ? (
-              <>
-                <span className=" text-blue-500">{countdown}s </span>
-                <span>{t("placeholder.regain") + t("placeholder.verifyCode")}</span>
-              </>
-            ) : (
-              <>
-                <span onClick={sendSmsHandle} className="cursor-pointer text-blue-500">
-                  {t("placeholder.regain")}
-                </span>
-                <span>{t("placeholder.verifyCode")}</span>
-              </>
-            )}
-          </div>
         </Form.Item>
 
         {registerForm === 2 && (
