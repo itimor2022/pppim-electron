@@ -76,6 +76,15 @@ export interface ConversationStore {
   currentMemberInGroupLoading: boolean;
   quoteMessage?: MessageItem;
   revokeMap: Record<string, RevokeMessageData>;
+  /** 已从 SDK 本地库加载的会话数(本地分页游标) */
+  localLoadedCount: number;
+  /** SDK 本地库会话是否已全部加载 */
+  localExhausted: boolean;
+  /** 已从服务端远程追加的会话数(远程分页游标) */
+  remoteLoadedCount: number;
+  /** 服务端是否还有更多会话可拉取 */
+  remoteHasMore: boolean;
+  remoteLoading: boolean;
   getConversationListByReq: (isOffset?: boolean) => Promise<boolean>;
   updateConversationList: (
     list: ConversationItem[],

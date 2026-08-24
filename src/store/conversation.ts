@@ -8,7 +8,11 @@ import {
 } from "open-im-sdk-wasm/lib/types/entity";
 import { create } from "zustand";
 
-import { getServerGroupMembersInfo } from "@/api/imApi";
+import {
+  ConversationItemWithRemoteFlag,
+  getActiveConversations,
+  getServerGroupMembersInfo,
+} from "@/api/imApi";
 import { IMSDK } from "@/layout/MainContentWrap";
 import { feedbackToast } from "@/utils/common";
 import { conversationSort, isGroupSession } from "@/utils/imCommon";
@@ -22,6 +26,7 @@ import {
 import { useUserStore } from "./user";
 
 const CONVERSATION_SPLIT_COUNT = 500;
+const REMOTE_CONVERSATION_COUNT = 100;
 
 export const useConversationStore = create<ConversationStore>()((set, get) => ({
   conversationList: [],
@@ -32,25 +37,78 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
   currentMemberInGroupLoading: false,
   quoteMessage: undefined,
   revokeMap: {} as Record<string, RevokeMessageData>,
+  localLoadedCount: 0,
+  localExhausted: false,
+  remoteLoadedCount: 0,
+  remoteHasMore: true,
+  remoteLoading: false,
+  // 两阶段按量拉取:
+  // 阶段一(本地): 从 SDK 本地库分页读取登录同步窗口内的会话;
+  // 阶段二(远程): 本地耗尽后调用服务端分页接口"下拉加载"更老的会话。
   getConversationListByReq: async (isOffset?: boolean) => {
-    let tmpConversationList = [] as ConversationItem[];
-    try {
-      const { data } = await IMSDK.getConversationListSplit({
-        offset: isOffset ? get().conversationList.length : 0,
-        count: CONVERSATION_SPLIT_COUNT,
-      });
-      tmpConversationList = data;
-    } catch (error) {
-      feedbackToast({ error, msg: t("toast.getConversationFailed") });
+    if (!isOffset) {
+      set(() => ({
+        localLoadedCount: 0,
+        localExhausted: false,
+        remoteLoadedCount: 0,
+        remoteHasMore: true,
+        remoteLoading: false,
+      }));
+    }
+    if (!get().localExhausted) {
+      let tmpConversationList = [] as ConversationItem[];
+      try {
+        const { data } = await IMSDK.getConversationListSplit({
+          offset: isOffset ? get().localLoadedCount : 0,
+          count: CONVERSATION_SPLIT_COUNT,
+        });
+        tmpConversationList = data;
+      } catch (error) {
+        feedbackToast({ error, msg: t("toast.getConversationFailed") });
+        return false;
+      }
+      set((state) => ({
+        conversationList: [
+          ...(isOffset ? state.conversationList : []),
+          ...tmpConversationList,
+        ],
+        localLoadedCount:
+          (isOffset ? state.localLoadedCount : 0) + tmpConversationList.length,
+        localExhausted: tmpConversationList.length < CONVERSATION_SPLIT_COUNT,
+      }));
       return true;
     }
-    set((state) => ({
-      conversationList: [
-        ...(isOffset ? state.conversationList : []),
-        ...tmpConversationList,
-      ],
-    }));
-    return tmpConversationList.length === CONVERSATION_SPLIT_COUNT;
+
+    // 远程阶段: 服务端活跃会话分页
+    if (get().remoteLoading) return true;
+    if (!get().remoteHasMore) return false;
+    set(() => ({ remoteLoading: true }));
+    try {
+      const offset = get().remoteLoadedCount;
+      const { data } = await getActiveConversations({
+        offset,
+        count: REMOTE_CONVERSATION_COUNT,
+      });
+      const remoteItems =
+        (data.conversations ?? []) as ConversationItemWithRemoteFlag[];
+      const existIDs = new Set(
+        get().conversationList.map((c) => c.conversationID),
+      );
+      const appendItems = remoteItems.filter(
+        (item) => !existIDs.has(item.conversationID),
+      );
+      set((state) => ({
+        conversationList: [...state.conversationList, ...appendItems],
+        remoteLoadedCount: offset + remoteItems.length,
+        remoteHasMore: offset + remoteItems.length < data.total,
+      }));
+      return get().remoteHasMore;
+    } catch (error) {
+      console.error(error);
+      return false;
+    } finally {
+      set(() => ({ remoteLoading: false }));
+    }
   },
   updateConversationList: (
     list: ConversationItem[],
@@ -219,6 +277,11 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
       currentMemberInGroup: undefined,
       currentMemberInGroupLoading: false,
       quoteMessage: undefined,
+      localLoadedCount: 0,
+      localExhausted: false,
+      remoteLoadedCount: 0,
+      remoteHasMore: true,
+      remoteLoading: false,
     }));
   },
 }));

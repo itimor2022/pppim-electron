@@ -20,10 +20,14 @@ export function useConversationToggle() {
     sourceID: string;
     sessionType: SessionType;
   }): Promise<ConversationItem | undefined> => {
+    // 排除仅存在于服务端分页结果中的会话(onlyRemote), 其必须先经
+    // getOneConversation 同步进 SDK 本地库才能正常进入聊天
     let conversation = useConversationStore
       .getState()
       .conversationList.find(
-        (item) => item.userID === sourceID || item.groupID === sourceID,
+        (item) =>
+          !(item as { onlyRemote?: boolean }).onlyRemote &&
+          (item.userID === sourceID || item.groupID === sourceID),
       );
     if (!conversation) {
       try {

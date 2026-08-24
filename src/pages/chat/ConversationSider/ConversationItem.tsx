@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import disturb from "@/assets/images/disturb.png";
 import OIMAvatar from "@/components/OIMAvatar";
 import { parseTwemoji } from "@/components/Twemoji";
+import { useConversationToggle } from "@/hooks/useConversationToggle";
 import { useConversationStore } from "@/store";
 import { formatConversionTime, getConversationContent } from "@/utils/imCommon";
 
@@ -34,6 +35,8 @@ const ConversationItem = ({ conversation }: IConversationProps) => {
   const updateCurrentConversation = useConversationStore(
     (state) => state.updateCurrentConversation,
   );
+  const { toSpecifiedConversation: toggleToConversation } =
+    useConversationToggle();
 
   const { droping } = useDropFileAndDom({
     domRef: conversationItemRef,
@@ -41,6 +44,14 @@ const ConversationItem = ({ conversation }: IConversationProps) => {
   });
 
   const toSpecifiedConversation = () => {
+    // 远程会话(未同步进本地库): 先通过 getOneConversation 建立本地会话再进入
+    if ((conversation as { onlyRemote?: boolean }).onlyRemote) {
+      toggleToConversation({
+        sourceID: conversation.groupID || conversation.userID,
+        sessionType: conversation.conversationType as SessionType,
+      });
+      return;
+    }
     updateCurrentConversation({ ...conversation });
     navigate(`/chat/${conversation.conversationID}`);
   };
@@ -117,7 +128,7 @@ const ConversationItem = ({ conversation }: IConversationProps) => {
 
   const isActive =
     conversationID === conversation.conversationID || conversation.isPinned;
-  const notNomalReceive = conversation.recvMsgOpt !== MessageReceiveOptType.Nomal;
+  const notNomalReceive = conversation.recvMsgOpt !== MessageReceiveOptType.Normal;
 
   return (
     <Popover
