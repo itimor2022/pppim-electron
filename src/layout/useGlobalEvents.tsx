@@ -239,7 +239,9 @@ export function useGlobalEvent() {
         platformID: window.electronAPI?.getPlatform() ?? 5,
         apiAddr: getApiUrl(),
         wsAddr: getWsUrl(),
-        logLevel: LogLevel.Debug,
+        // 大账号同步期间 SDK 会产生海量请求/数据日志, 生产环境关闭 Debug 打印,
+        // 避免浏览器 console 堆积几十万条消息导致卡顿。
+        logLevel: import.meta.env.PROD ? LogLevel.Warn : LogLevel.Debug,
       });
       window.electronAPI?.ipcInvoke("setUserCachePath", IMUserID);
       initStore();
@@ -337,10 +339,16 @@ export function useGlobalEvent() {
       "updateUnreadCount",
       useConversationStore.getState().unReadCount,
     );
+    // 登录同步完成: 服务端窗口内的会话此时已写入本地库。
+    // login 后立即执行的 initStore 在同步完成前本地库为空(大账号同步耗时较长),
+    // 此处必须重新拉取一次会话列表, 否则首次登录会出现"会话列表空白"。
+    useConversationStore.getState().getConversationListByReq();
     setConnectState((state) => ({ ...state, isSyncing: false }));
   };
   const syncFailedHandler = () => {
     feedbackToast({ msg: t("toast.syncFailed"), error: t("toast.syncFailed") });
+    // 同步失败也要尝试刷新一次: 部分数据(如已入库的窗口内会话)仍可展示
+    useConversationStore.getState().getConversationListByReq();
     setConnectState((state) => ({ ...state, isSyncing: false }));
   };
 
