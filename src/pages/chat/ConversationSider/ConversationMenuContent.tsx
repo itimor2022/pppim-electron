@@ -33,6 +33,9 @@ const ConversationMenuContent = memo(
     const updateCurrentConversation = useConversationStore(
       (state) => state.updateCurrentConversation,
     );
+    const markConversationAsReadByReq = useConversationStore(
+      (state) => state.markConversationAsReadByReq,
+    );
 
     const updateConversationPin = async () => {
       setLoading(true);
@@ -65,7 +68,7 @@ const ConversationMenuContent = memo(
     const markConversationAsRead = async () => {
       setLoading(true);
       try {
-        await IMSDK.markConversationMessageAsRead(conversation.conversationID);
+        await markConversationAsReadByReq(conversation);
       } catch (error) {
         feedbackToast({ error });
       }

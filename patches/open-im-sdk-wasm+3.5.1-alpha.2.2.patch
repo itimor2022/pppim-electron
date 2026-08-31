@@ -1,0 +1,174 @@
+diff --git a/node_modules/open-im-sdk-wasm/lib/index.es.js b/node_modules/open-im-sdk-wasm/lib/index.es.js
+index 81453a6..75f18c2 100644
+--- a/node_modules/open-im-sdk-wasm/lib/index.es.js
++++ b/node_modules/open-im-sdk-wasm/lib/index.es.js
+@@ -515,7 +515,6 @@ function catchErrorHandle(error) {
+     throw error;
+ }
+ function registeMethodOnWindow(name, realName, needStringify = true) {
+-    console.info(`=> (database api) registe ${realName !== null && realName !== void 0 ? realName : name}`);
+     return async (...args) => {
+         if (!rpc || !worker) {
+             initWorker();
+@@ -524,9 +523,7 @@ function registeMethodOnWindow(name, realName, needStringify = true) {
+             return;
+         }
+         try {
+-            console.info(`=> (invoked by go wasm) run ${realName !== null && realName !== void 0 ? realName : name} method with args ${JSON.stringify(args)}`);
+             const response = await rpc.invoke(name, ...args, { timeout: 5000000 });
+-            console.info(`=> (invoked by go wasm) run ${realName !== null && realName !== void 0 ? realName : name} method with response `, JSON.stringify(response));
+             if (!needStringify) {
+                 return response;
+             }
+@@ -688,9 +685,7 @@ function initDatabaseAPI() {
+             return;
+         }
+         try {
+-            console.info('=> (invoked by go wasm) run exportDB method ');
+             const result = await rpc.invoke('exportDB', undefined, { timeout: 5000 });
+-            console.info('=> (invoked by go wasm) run exportDB method with response ', JSON.stringify(result));
+             return result;
+         }
+         catch (error) {
+@@ -926,15 +921,16 @@ class SDK extends Emitter {
+         this.isLogStandardOutput = true;
+         this.login = async (params, operationID = v4()) => {
+             var _a, _b;
+-            this._logWrap(`SDK => (invoked by js) run login with args ${JSON.stringify({
+-                params,
+-                operationID,
+-            })}`);
++            if (this.isLogStandardOutput) {
++                this._logWrap(`SDK => (invoked by js) run login with args ${JSON.stringify({
++                    params,
++                    operationID,
++                })}`);
++            }
+             await workerPromise;
+             await this.wasmInitializedPromise;
+             window.commonEventFunc(event => {
+                 try {
+-                    console.info(`%cSDK =>%c received event %c${event}%c `, logBoxStyleValue('#282828', '#ffffff'), '', 'color: #4f2398;', '');
+                     const parsed = JSON.parse(event);
+                     if (this.tryParse) {
+                         try {
+@@ -1718,7 +1714,9 @@ class SDK extends Emitter {
+     }
+     _invoker(functionName, func, args, processor) {
+         return new Promise(async (resolve, reject) => {
+-            this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with args ${JSON.stringify(args)}`, 'font-size:14px; background:#7CAEFF; border-radius:4px; padding-inline:4px;', '');
++            if (this.isLogStandardOutput) {
++                this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with args ${JSON.stringify(args)}`, 'font-size:14px; background:#7CAEFF; border-radius:4px; padding-inline:4px;', '');
++            }
+             let response = {
+                 operationID: args[0],
+                 event: (functionName.slice(0, 1).toUpperCase() +
+@@ -1730,7 +1728,9 @@ class SDK extends Emitter {
+                 }
+                 let data = await func(...args);
+                 if (processor) {
+-                    this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with response before processor ${JSON.stringify(data)}`, logBoxStyleValue('#FFDC19'), '');
++                    if (this.isLogStandardOutput) {
++                        this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with response before processor ${JSON.stringify(data)}`, logBoxStyleValue('#FFDC19'), '');
++                    }
+                     data = processor(data);
+                 }
+                 if (this.tryParse) {
+@@ -1745,7 +1745,9 @@ class SDK extends Emitter {
+                 resolve(response);
+             }
+             catch (error) {
+-                this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with error ${JSON.stringify(error)}`, logBoxStyleValue('#EE4245'), '');
++                if (this.isLogStandardOutput) {
++                    this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with error ${JSON.stringify(error)}`, logBoxStyleValue('#EE4245'), '');
++                }
+                 response = {
+                     ...response,
+                     ...error,
+diff --git a/node_modules/open-im-sdk-wasm/lib/index.js b/node_modules/open-im-sdk-wasm/lib/index.js
+index 9da159e..70404c7 100644
+--- a/node_modules/open-im-sdk-wasm/lib/index.js
++++ b/node_modules/open-im-sdk-wasm/lib/index.js
+@@ -519,7 +519,6 @@ function catchErrorHandle(error) {
+     throw error;
+ }
+ function registeMethodOnWindow(name, realName, needStringify = true) {
+-    console.info(`=> (database api) registe ${realName !== null && realName !== void 0 ? realName : name}`);
+     return async (...args) => {
+         if (!rpc || !worker) {
+             initWorker();
+@@ -528,9 +527,7 @@ function registeMethodOnWindow(name, realName, needStringify = true) {
+             return;
+         }
+         try {
+-            console.info(`=> (invoked by go wasm) run ${realName !== null && realName !== void 0 ? realName : name} method with args ${JSON.stringify(args)}`);
+             const response = await rpc.invoke(name, ...args, { timeout: 5000000 });
+-            console.info(`=> (invoked by go wasm) run ${realName !== null && realName !== void 0 ? realName : name} method with response `, JSON.stringify(response));
+             if (!needStringify) {
+                 return response;
+             }
+@@ -692,9 +689,7 @@ function initDatabaseAPI() {
+             return;
+         }
+         try {
+-            console.info('=> (invoked by go wasm) run exportDB method ');
+             const result = await rpc.invoke('exportDB', undefined, { timeout: 5000 });
+-            console.info('=> (invoked by go wasm) run exportDB method with response ', JSON.stringify(result));
+             return result;
+         }
+         catch (error) {
+@@ -930,15 +925,16 @@ class SDK extends Emitter {
+         this.isLogStandardOutput = true;
+         this.login = async (params, operationID = v4()) => {
+             var _a, _b;
+-            this._logWrap(`SDK => (invoked by js) run login with args ${JSON.stringify({
+-                params,
+-                operationID,
+-            })}`);
++            if (this.isLogStandardOutput) {
++                this._logWrap(`SDK => (invoked by js) run login with args ${JSON.stringify({
++                    params,
++                    operationID,
++                })}`);
++            }
+             await workerPromise;
+             await this.wasmInitializedPromise;
+             window.commonEventFunc(event => {
+                 try {
+-                    console.info(`%cSDK =>%c received event %c${event}%c `, logBoxStyleValue('#282828', '#ffffff'), '', 'color: #4f2398;', '');
+                     const parsed = JSON.parse(event);
+                     if (this.tryParse) {
+                         try {
+@@ -1722,7 +1718,9 @@ class SDK extends Emitter {
+     }
+     _invoker(functionName, func, args, processor) {
+         return new Promise(async (resolve, reject) => {
+-            this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with args ${JSON.stringify(args)}`, 'font-size:14px; background:#7CAEFF; border-radius:4px; padding-inline:4px;', '');
++            if (this.isLogStandardOutput) {
++                this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with args ${JSON.stringify(args)}`, 'font-size:14px; background:#7CAEFF; border-radius:4px; padding-inline:4px;', '');
++            }
+             let response = {
+                 operationID: args[0],
+                 event: (functionName.slice(0, 1).toUpperCase() +
+@@ -1734,7 +1732,9 @@ class SDK extends Emitter {
+                 }
+                 let data = await func(...args);
+                 if (processor) {
+-                    this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with response before processor ${JSON.stringify(data)}`, logBoxStyleValue('#FFDC19'), '');
++                    if (this.isLogStandardOutput) {
++                        this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with response before processor ${JSON.stringify(data)}`, logBoxStyleValue('#FFDC19'), '');
++                    }
+                     data = processor(data);
+                 }
+                 if (this.tryParse) {
+@@ -1749,7 +1749,9 @@ class SDK extends Emitter {
+                 resolve(response);
+             }
+             catch (error) {
+-                this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with error ${JSON.stringify(error)}`, logBoxStyleValue('#EE4245'), '');
++                if (this.isLogStandardOutput) {
++                    this._logWrap(`%cSDK =>%c [OperationID:${args[0]}] (invoked by js) run ${functionName} with error ${JSON.stringify(error)}`, logBoxStyleValue('#EE4245'), '');
++                }
+                 response = {
+                     ...response,
+                     ...error,

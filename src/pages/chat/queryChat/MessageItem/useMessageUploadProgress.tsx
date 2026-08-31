@@ -4,10 +4,13 @@ import { useEffect, useState } from "react";
 
 import { IMSDK } from "@/layout/MainContentWrap";
 
-export function useMessageUploadProgress(uploadClientMsgID: string) {
+export function useMessageUploadProgress(uploadClientMsgID: string, enabled: boolean) {
   const [uploadProgress, setUploadProgress] = useState(0);
 
   useEffect(() => {
+    if (!enabled) return;
+
+    setUploadProgress(0);
     const uploadHandler = ({
       data: { clientMsgID, progress },
     }: WSEvent<{ clientMsgID: string; progress: number }>) => {
@@ -19,7 +22,7 @@ export function useMessageUploadProgress(uploadClientMsgID: string) {
     return () => {
       IMSDK.off(CbEvents.OnProgress, uploadHandler);
     };
-  }, []);
+  }, [enabled, uploadClientMsgID]);
 
   return uploadProgress;
 }

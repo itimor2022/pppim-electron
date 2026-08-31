@@ -7,6 +7,7 @@ import {
   ReactNode,
   useEffect,
   useImperativeHandle,
+  useRef,
   useState,
 } from "react";
 
@@ -25,6 +26,7 @@ const MediaPreview: ForwardRefRenderFunction<
   const latestVisible = useLatest(albumVisible);
   const [autoPlay, setAutoPlay] = useState(false);
   const [albumCurrent, setAlbumCurrent] = useState(0);
+  const albumCurrentClientMsgID = useRef<string>();
   const previewImgList = useMessageStore((state) => state.previewImgList);
   const updateDownloadTask = useMessageStore((state) => state.updateDownloadTask);
   const imageCache = useUserStore((state) => state.imageCache);
@@ -33,10 +35,12 @@ const MediaPreview: ForwardRefRenderFunction<
   );
 
   useEffect(() => {
-    if (previewImgList.length && latestVisible.current) {
-      setAlbumCurrent((current) => current + 1);
-    }
-  }, [previewImgList.length]);
+    if (!latestVisible.current || !albumCurrentClientMsgID.current) return;
+    const nextIndex = previewImgList.findIndex(
+      (image) => image.clientMsgID === albumCurrentClientMsgID.current,
+    );
+    if (nextIndex >= 0) setAlbumCurrent(nextIndex);
+  }, [latestVisible, previewImgList]);
 
   const downloadOrShowFinder = (current: number) => {
     const { url, videoUrl, clientMsgID } = previewImgList[current];
@@ -77,6 +81,7 @@ const MediaPreview: ForwardRefRenderFunction<
       findItem = useMessageStore.getState().previewImgList[current];
     }
     if (current < 0) return;
+    albumCurrentClientMsgID.current = clientMsgID;
     const sourceUrl = findItem.videoUrl ?? findItem.url;
     if (window.electronAPI && sourceUrl.startsWith("http")) {
       downloadFile(sourceUrl, {
@@ -95,6 +100,7 @@ const MediaPreview: ForwardRefRenderFunction<
   };
 
   const onToggle = (next: number) => {
+    albumCurrentClientMsgID.current = previewImgList[next].clientMsgID;
     const sourceUrl = previewImgList[next].videoUrl ?? previewImgList[next].url;
     if (window.electronAPI && sourceUrl.startsWith("http")) {
       downloadFile(sourceUrl, {
@@ -125,6 +131,7 @@ const MediaPreview: ForwardRefRenderFunction<
         preview={{
           current: albumCurrent,
           visible: albumVisible,
+          destroyOnClose: true,
           toolbarRender: (originalNode, { current }) => {
             const previewItem = previewImgList[current];
             const isFileDownloadedField = previewItem.videoUrl ? "videoUrl" : "url";
@@ -146,9 +153,13 @@ const MediaPreview: ForwardRefRenderFunction<
               dom={originNode}
               source={previewImgList[current]}
               autoplay={autoPlay}
+              visible={albumVisible && current === albumCurrent}
             />
           ),
-          onVisibleChange: (vis) => setAlbumVisible(vis),
+          onVisibleChange: (vis) => {
+            if (!vis) setAutoPlay(false);
+            setAlbumVisible(vis);
+          },
           onChange: onToggle,
         }}
         items={previewList}
@@ -165,10 +176,12 @@ const PreviewItemRender = ({
   dom,
   source,
   autoplay,
+  visible,
 }: {
   dom: ReactNode;
   source: PreviewGroupItem;
   autoplay: boolean;
+  visible: boolean;
 }) => {
   const updateDownloadTask = useMessageStore((state) => state.updateDownloadTask);
   const currentTask = useMessageStore((state) =>
@@ -178,24 +191,6 @@ const PreviewItemRender = ({
       compareValue: source.clientMsgID,
     }),
   );
-
-  useEffect(() => {
-    const el = document.getElementsByClassName(
-      "ant-image-preview-img",
-    )[0] as HTMLImageElement | null;
-    if (!el) return;
-    el.addEventListener("load", () => {
-      el.style.display = "block";
-    });
-    if (el.complete) {
-      el.style.display = "block";
-    }
-    return () => {
-      if (!el) return;
-
-      el.style.display = "none";
-    };
-  }, [source.clientMsgID]);
 
   const tryPlayVideo = () => {
     if (
@@ -229,6 +224,8 @@ const PreviewItemRender = ({
     }
   };
 
+  if (!visible) return null;
+
   if (!source.videoUrl) {
     return (
       <>
@@ -245,7 +242,7 @@ const PreviewItemRender = ({
   if (source.videoUrl?.startsWith("file://") || !window.electronAPI) {
     return (
       <div className="relative">
-        <VideoPlayer url={source.videoUrl} autoplay={autoplay} />
+        <VideoPlayer url={source.videoUrl} autoplay={autoplay} poster={source.url} />
       </div>
     );
   }

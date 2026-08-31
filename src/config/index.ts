@@ -1,8 +1,8 @@
 // WS 10001 API 10002 CHAT 10008 CONFIG 10009
 
-export const WS_URL = "wss://xs.szim1.shop/msg_gateway";
-export const API_URL = "https://xs.szim1.shop/api";
-export const CHAT_URL = "https://xs.szim1.shop/chat";
+export const WS_URL = "wss://qaqapi.qzmk.shop/msg_gateway";
+export const API_URL = "https://qaqapi.qzmk.shop/api";
+export const CHAT_URL = "https://qaqapi.qzmk.shop/chat";
 
 // export const WS_URL = "ws://14.29.213.197:50001";
 // export const API_URL = "http://14.29.213.197:50002";

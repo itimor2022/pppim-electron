@@ -13,12 +13,12 @@ interface TwemojiProps {
   [key: string]: unknown;
 }
 
+const electronExtraResourcesPath = window.electronAPI?.getDataPath("extraResources");
 const baseOptions = {
   className: "emojione",
-  base: `${
-    window.electronAPI?.getDataPath("extraResources") ||
-    "https://cdnjs.cloudflare.com/ajax/libs/"
-  }/twemoji/14.0.2/`,
+  base: electronExtraResourcesPath
+    ? new URL("/twemoji/14.0.2/", window.location.origin).toString()
+    : "https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/",
 };
 
 const Twemoji: React.FC<TwemojiProps> = (props) => {
@@ -72,9 +72,7 @@ export default Twemoji;
 export const parseTwemoji = (unicode: string) => {
   const div = document.createElement("div");
   div.textContent = unicode;
-  document.body.appendChild(div);
-  twemoji.parse(document.body, baseOptions);
-  setTimeout(() => document.body.removeChild(div));
+  twemoji.parse(div, baseOptions);
 
   return unescapeHTMLTags(div.innerHTML);
 };

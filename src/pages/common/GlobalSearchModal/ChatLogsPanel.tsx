@@ -79,7 +79,10 @@ export const ChatLogsRender = memo(
             </div>
             <div className="mt-2 select-text text-xs text-[var(--sub-text)]">
               {result.description ||
-                getConversationContent({ ...result, groupID: "" } as MessageItem)}
+                getConversationContent({
+                  ...result,
+                  groupID: "",
+                } as MessageItem)}
             </div>
           </div>
         </div>
@@ -106,10 +109,14 @@ const ChatLogsPanel: ForwardRefRenderFunction<
   });
 
   useEffect(() => {
-    if (loading) {
-      updateIdx(-1);
+    if (!data.length) {
+      if (activeIdx !== -1) updateIdx(-1);
+      return;
     }
-  }, [loading]);
+    if (activeIdx < 0 || activeIdx >= data.length) {
+      updateIdx(0);
+    }
+  }, [activeIdx, data.length]);
 
   useImperativeHandle(ref, () => ({ updateIdx }), []);
 

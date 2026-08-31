@@ -8,6 +8,12 @@
     output: "release/${version}",
   },
   files: ["dist-electron", "dist"],
+  extraResources: [
+    {
+      from: "extraResources",
+      to: "extraResources",
+    },
+  ],
   mac: {
     artifactName: "${productName}_${version}.${ext}",
     target: ["dmg"],

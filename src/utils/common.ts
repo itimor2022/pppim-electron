@@ -7,6 +7,32 @@ import { FriendUserItem } from "open-im-sdk-wasm/lib/types/entity";
 import { useMessageStore } from "@/store";
 import { DownloadData } from "@/store/type";
 
+const contactInitialMap = new Map<string, string>();
+Object.entries(PinYin).forEach(([pinyin, characters]) => {
+  const initial = pinyin.charAt(0).toUpperCase();
+  for (const character of characters) {
+    if (!contactInitialMap.has(character)) {
+      contactInitialMap.set(character, initial);
+    }
+  }
+});
+
+const getContactInitial = (name?: string) => {
+  for (const character of name ?? "unkown") {
+    if (/[a-zA-Z]/.test(character)) {
+      return character.toUpperCase();
+    }
+    if (/[0-9 -]/.test(character)) {
+      return "#";
+    }
+    const initial = contactInitialMap.get(character);
+    if (initial) {
+      return initial;
+    }
+  }
+  return "#";
+};
+
 type FeedbackToastParams = {
   msg?: string | null;
   error?: unknown;
@@ -87,101 +113,26 @@ export const secondsToMS = (duration: number) => {
   return `${minutes}:${seconds}`;
 };
 
-export const formatContacts = (data: FriendUserItem[], key = "nickname") => {
-  const ucfirst = (l1: string) => {
-    if (l1.length > 0) {
-      const first = l1.substr(0, 1).toUpperCase();
-      const spare = l1.substr(1, l1.length);
-      return first + spare;
-    }
-  };
-
-  const arraySearch = (l1: string) => {
-    for (const name in PinYin) {
-      // @ts-ignore
-      if ((PinYin[name] as string).indexOf(l1) !== -1) {
-        return ucfirst(name);
-      }
-    }
-    return false;
-  };
-
-  const codefans = (l1: string) => {
-    l1 = l1 ?? "unkown";
-    const l2 = l1.length;
-    let I1 = "";
-    const reg = new RegExp("[a-zA-Z0-9- ]");
-    for (let i = 0; i < l2; i++) {
-      const val = l1.substr(i, 1);
-      const name = arraySearch(val);
-      if (reg.test(val)) {
-        I1 += val;
-      } else if (name !== false) {
-        I1 += name;
-      }
-    }
-    I1 = I1.replace(/ /g, "-");
-    while (I1.indexOf("--") > 0) {
-      I1 = I1.replace("--", "-");
-    }
-    return I1;
-  };
-
-  const arr = [];
-
-  for (i = 0; i < data.length; i++) {
-    // @ts-ignore
-    const firstName = (data[i].initial = codefans(data[i][key]).substr(0, 1));
-    arr.push(firstName.toUpperCase());
-  }
-
-  const arrlist = [];
-  for (i = 0; i < arr.length; i++) {
-    if (arrlist.indexOf(arr[i]) === -1) {
-      arrlist.push(arr[i]);
-    }
-  }
-
-  // @ts-ignore
-  const dataSort = [] as any[];
-  for (i = 0; i < arrlist.length; i++) {
-    dataSort[i] = {
-      initial: arrlist[i],
-    };
-    dataSort[i].data = [];
-    for (j = 0; j < data.length; j++) {
-      // @ts-ignore
-      if (data[j].initial.toUpperCase() === dataSort[i].initial) {
-        dataSort[i].data.push(data[j]);
-      }
-    }
-  }
-  for (var i = 0; i < dataSort.length - 1; i++) {
-    for (var j = 1; j < dataSort.length - i; j++) {
-      if (dataSort[j - 1].initial > dataSort[j].initial) {
-        const a = dataSort[j];
-        dataSort[j] = dataSort[j - 1];
-        dataSort[j - 1] = a;
-      }
-    }
-  }
-  const NomalInitial = "QWERTYUIOPLKJHGFDSAZXCVBNM".split("");
-  const special = {
-    initial: "#",
-    data: [] as any[],
-  };
-  const newFilterData = dataSort.filter((d) => {
-    if (!NomalInitial.includes(d.initial)) {
-      special.data = [...special.data, ...d.data];
-    } else {
-      return d;
-    }
+export const formatContacts = (
+  data: FriendUserItem[],
+  key: keyof FriendUserItem = "nickname",
+) => {
+  const groups = new Map<string, FriendUserItem[]>();
+  data.forEach((friend) => {
+    const value = friend[key];
+    const initial = getContactInitial(typeof value === "string" ? value : undefined);
+    const friends = groups.get(initial) ?? [];
+    friends.push(friend);
+    groups.set(initial, friends);
   });
-  if (special.data.length > 0) {
-    newFilterData.push(special);
+
+  const indexList = Array.from(groups.keys())
+    .filter((initial) => initial !== "#")
+    .sort();
+  if (groups.has("#")) {
+    indexList.push("#");
   }
-  const indexList = newFilterData.map((item) => item.initial as string);
-  const dataList = newFilterData.map((item) => item.data as FriendUserItem[]);
+  const dataList = indexList.map((initial) => groups.get(initial)!);
   return {
     indexList,
     dataList,
@@ -200,26 +151,80 @@ export const checkIsSafari = () =>
   /^((?!chrome|android).)*safari/i.test(navigator.userAgent) &&
   /iPad|iPhone|iPod/.test(navigator.userAgent);
 
+const AUTO_DOWNLOAD_MAX_CONCURRENCY = 4;
+const queuedAutoDownloadURLs = new Set<string>();
+const activeAutoDownloadURLs = new Set<string>();
+const pendingAutoDownloadOriginURLs = new Set<string>();
+const autoDownloadOriginByURL = new Map<string, string>();
+const autoDownloadQueue: Array<{
+  downloadUrl: string;
+  data: DownloadData;
+}> = [];
+
+const startElectronDownload = (downloadUrl: string, data: DownloadData) => {
+  useMessageStore.getState().addDownloadTask(downloadUrl, {
+    ...data,
+    downloadUrl,
+    downloadState: "downloading",
+  });
+  void Promise.resolve(
+    window.electronAPI?.ipcInvoke("startDownload", {
+      url: downloadUrl,
+      saveType: data.saveType,
+      randomPrefix: data.randomName ? uuidv4() : undefined,
+    }),
+  ).catch(() => {
+    useMessageStore.getState().removeDownloadTask(downloadUrl);
+    finishAutoDownload(downloadUrl);
+    if (data.showError) message.error(t("toast.downloadFailed"));
+  });
+};
+
+const runAutoDownloadQueue = () => {
+  while (
+    activeAutoDownloadURLs.size < AUTO_DOWNLOAD_MAX_CONCURRENCY &&
+    autoDownloadQueue.length
+  ) {
+    const task = autoDownloadQueue.shift();
+    if (!task) return;
+    queuedAutoDownloadURLs.delete(task.downloadUrl);
+    activeAutoDownloadURLs.add(task.downloadUrl);
+    startElectronDownload(task.downloadUrl, task.data);
+  }
+};
+
+export const finishAutoDownload = (downloadUrl: string) => {
+  if (!activeAutoDownloadURLs.delete(downloadUrl)) return;
+  const originUrl = autoDownloadOriginByURL.get(downloadUrl);
+  if (originUrl) pendingAutoDownloadOriginURLs.delete(originUrl);
+  autoDownloadOriginByURL.delete(downloadUrl);
+  runAutoDownloadQueue();
+};
+
 export const downloadFile = async (originUrl: string, data: DownloadData) => {
   if (window.electronAPI) {
     try {
-      const tmpURL = new URL(originUrl);
-      const searchParams = new URLSearchParams(tmpURL.search);
-      searchParams.set("save-type", data.saveType ?? "file");
-      if (data.randomName) {
-        searchParams.set("random-prefix", uuidv4());
-      }
-      tmpURL.search = searchParams.toString();
-      const downloadUrl = tmpURL.toString();
-      const hasTask = !!useMessageStore.getState().downloadMap[downloadUrl];
+      const downloadUrl = originUrl;
+      const hasTask =
+        !!useMessageStore.getState().downloadMap[downloadUrl] ||
+        queuedAutoDownloadURLs.has(downloadUrl) ||
+        activeAutoDownloadURLs.has(downloadUrl) ||
+        (data.isThumb && pendingAutoDownloadOriginURLs.has(originUrl));
       if (hasTask) return;
-      window.electronAPI.ipcInvoke("startDownload", downloadUrl);
-      useMessageStore.getState().addDownloadTask(downloadUrl, {
+
+      const downloadData = {
         ...data,
         originUrl,
-        downloadUrl,
-        downloadState: "downloading",
-      });
+      };
+      if (data.isThumb) {
+        queuedAutoDownloadURLs.add(downloadUrl);
+        pendingAutoDownloadOriginURLs.add(originUrl);
+        autoDownloadOriginByURL.set(downloadUrl, originUrl);
+        autoDownloadQueue.push({ downloadUrl, data: downloadData });
+        runAutoDownloadQueue();
+      } else {
+        startElectronDownload(downloadUrl, downloadData);
+      }
     } catch (error) {
       if (data.showError) message.error(t("toast.downloadFailed"));
     }

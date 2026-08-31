@@ -1,30 +1,40 @@
 import { Image, ImageProps } from "antd";
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 
 import { useUserStore } from "@/store";
 import { downloadFile } from "@/utils/common";
 
 const CacheImage = (props: ImageProps) => {
-  const getSourceUrl = useMemo(() => {
-    if (!window.electronAPI || props.src?.match(/^blob:/)) return props.src;
+  const cachePath = useUserStore((state) =>
+    props.src ? state.imageCache[props.src] : undefined,
+  );
+  const [sourceURL, setSourceURL] = useState(props.src);
 
+  useEffect(() => {
+    if (!window.electronAPI || props.src?.match(/^blob:/)) {
+      setSourceURL(props.src);
+      return;
+    }
     if (!props.src?.match(/^https?:\/\//) && !props.src?.match(/^file:\/\//)) {
-      return `file://${props.src}`;
+      setSourceURL(props.src ? `file://${props.src}` : props.src);
+      return;
     }
-    const cachePath = useUserStore.getState().imageCache[props.src];
-    if (cachePath && window.electronAPI?.fileExists(cachePath)) {
-      return `file://${cachePath}`;
+    if (cachePath && window.electronAPI.fileExists(cachePath)) {
+      setSourceURL(`file://${cachePath}`);
+      return;
     }
-    if (props.src) {
-      downloadFile(props.src, {
+
+    setSourceURL(props.src);
+    if (props.src?.match(/^https?:\/\//)) {
+      void downloadFile(props.src, {
         isThumb: true,
         saveType: "image",
         randomName: true,
       });
     }
-    return props.src;
-  }, [props.src]);
-  return <Image {...props} src={getSourceUrl} />;
+  }, [cachePath, props.src]);
+
+  return <Image {...props} src={sourceURL} />;
 };
 
 export default CacheImage;

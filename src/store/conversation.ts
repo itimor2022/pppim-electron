@@ -11,7 +11,12 @@ import { create } from "zustand";
 import { getServerGroupMembersInfo } from "@/api/imApi";
 import { IMSDK } from "@/layout/MainContentWrap";
 import { feedbackToast } from "@/utils/common";
-import { conversationSort, isGroupSession } from "@/utils/imCommon";
+import {
+  conversationSort,
+  isGroupSession,
+  mergeConversationList,
+} from "@/utils/imCommon";
+import { scheduleIMSDKRequest } from "@/utils/imSdkRequestScheduler";
 
 import { useMessageStore } from "./message";
 import {
@@ -22,9 +27,21 @@ import {
 import { useUserStore } from "./user";
 
 const CONVERSATION_SPLIT_COUNT = 500;
+const MARK_READ_UNREAD_REFRESH_DELAY_MS = 200;
+
+type PendingMarkRead = {
+  promise: Promise<void>;
+  latestRequestedConversation?: ConversationItem;
+  latestRequestedMsg: string;
+  latestRequestedSendTime: number;
+};
+
+const pendingMarkReadRequests = new Map<string, PendingMarkRead>();
+let markReadUnreadRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 
 export const useConversationStore = create<ConversationStore>()((set, get) => ({
   conversationList: [],
+  isSyncing: false,
   currentConversation: undefined,
   unReadCount: 0,
   currentGroupInfo: undefined,
@@ -45,10 +62,10 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
       return true;
     }
     set((state) => ({
-      conversationList: [
+      conversationList: conversationSort([
         ...(isOffset ? state.conversationList : []),
         ...tmpConversationList,
-      ],
+      ]),
     }));
     return tmpConversationList.length === CONVERSATION_SPLIT_COUNT;
   },
@@ -56,24 +73,54 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
     list: ConversationItem[],
     type: ConversationListUpdateType,
   ) => {
+    if (type === "filter" && list === get().conversationList) {
+      set((state) => {
+        const conversationList = conversationSort([...state.conversationList]);
+        const orderChanged =
+          conversationList.length !== state.conversationList.length ||
+          conversationList.some(
+            (conversation, index) => conversation !== state.conversationList[index],
+          );
+        return orderChanged ? { conversationList } : state;
+      });
+      return;
+    }
+
     const idx = list.findIndex(
       (c) => c.conversationID === get().currentConversation?.conversationID,
     );
     if (idx > -1) get().updateCurrentConversation(list[idx]);
 
-    if (type === "filter") {
-      set((state) => ({
-        conversationList: conversationSort([...list, ...state.conversationList]),
-      }));
+    if (type === "preserve") {
+      set((state) => {
+        const pendingConversationMap = new Map(
+          list.map((conversation) => [conversation.conversationID, conversation]),
+        );
+        let listChanged = false;
+        const conversationList = state.conversationList.map((conversation) => {
+          const changedConversation = pendingConversationMap.get(
+            conversation.conversationID,
+          );
+          if (!changedConversation) return conversation;
+          pendingConversationMap.delete(conversation.conversationID);
+          if (changedConversation !== conversation) listChanged = true;
+          return changedConversation;
+        });
+        if (pendingConversationMap.size) {
+          listChanged = true;
+          conversationList.push(...pendingConversationMap.values());
+        }
+        return listChanged ? { conversationList } : state;
+      });
       return;
     }
-    let filterArr: ConversationItem[] = [];
-    const chids = list.map((ch) => ch.conversationID);
-    filterArr = get().conversationList.filter(
-      (tc) => !chids.includes(tc.conversationID),
-    );
 
-    set(() => ({ conversationList: conversationSort([...list, ...filterArr]) }));
+    set((state) => ({
+      conversationList: mergeConversationList(state.conversationList, list),
+    }));
+  },
+  updateSyncing: (isSyncing: boolean) => {
+    set(() => ({ isSyncing }));
   },
   delConversationByCID: (conversationID: string) => {
     const tmpConversationList = get().conversationList;
@@ -103,6 +150,7 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
       conversation.conversationID !== prevConversation?.conversationID;
     if (toggleNewConversation && isGroupSession(conversation.conversationType)) {
       set(() => ({
+        currentGroupInfo: undefined,
         currentMemberInGroup: undefined,
         currentMemberInGroupLoading: true,
       }));
@@ -120,14 +168,97 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
     }
     set(() => ({ currentConversation: { ...conversation } }));
   },
+  markConversationAsReadByReq: async (conversation) => {
+    const conversationID = conversation.conversationID;
+    const pendingRequest = pendingMarkReadRequests.get(conversationID);
+    if (pendingRequest) {
+      const hasNewerRequest =
+        conversation.latestMsgSendTime > pendingRequest.latestRequestedSendTime ||
+        (conversation.latestMsgSendTime === pendingRequest.latestRequestedSendTime &&
+          conversation.latestMsg !== pendingRequest.latestRequestedMsg);
+      if (hasNewerRequest) {
+        pendingRequest.latestRequestedConversation = conversation;
+        pendingRequest.latestRequestedMsg = conversation.latestMsg;
+        pendingRequest.latestRequestedSendTime = conversation.latestMsgSendTime;
+      }
+      return pendingRequest.promise;
+    }
+
+    const requestState: PendingMarkRead = {
+      promise: Promise.resolve(),
+      latestRequestedMsg: conversation.latestMsg,
+      latestRequestedSendTime: conversation.latestMsgSendTime,
+    };
+    requestState.promise = (async () => {
+      let targetConversation: ConversationItem | undefined = conversation;
+      while (targetConversation) {
+        requestState.latestRequestedConversation = undefined;
+        await scheduleIMSDKRequest(
+          () => IMSDK.markConversationMessageAsRead(targetConversation!.conversationID),
+          { priority: "normal" },
+        );
+
+        const latestConversation = get().conversationList.find(
+          (item) => item.conversationID === targetConversation?.conversationID,
+        );
+        const hasNewerMessage =
+          (latestConversation?.latestMsgSendTime ?? 0) >
+            targetConversation.latestMsgSendTime ||
+          latestConversation?.latestMsg !== targetConversation.latestMsg;
+        if (
+          latestConversation &&
+          !hasNewerMessage &&
+          latestConversation.unreadCount > 0
+        ) {
+          get().updateConversationList(
+            [{ ...latestConversation, unreadCount: 0 }],
+            "filter",
+          );
+        }
+        targetConversation = requestState.latestRequestedConversation;
+      }
+
+      if (markReadUnreadRefreshTimer) {
+        clearTimeout(markReadUnreadRefreshTimer);
+      }
+      markReadUnreadRefreshTimer = setTimeout(() => {
+        markReadUnreadRefreshTimer = undefined;
+        void scheduleIMSDKRequest(() => IMSDK.getTotalUnreadMsgCount(), {
+          priority: "normal",
+        })
+          .then(({ data }) => {
+            get().updateUnReadCount(data);
+            window.electronAPI?.ipcInvoke("updateUnreadCount", data);
+          })
+          .catch((error) => {
+            console.error(
+              "refresh total unread count after marking read failed",
+              error,
+            );
+          });
+      }, MARK_READ_UNREAD_REFRESH_DELAY_MS);
+    })();
+    pendingMarkReadRequests.set(conversationID, requestState);
+
+    try {
+      await requestState.promise;
+    } finally {
+      if (pendingMarkReadRequests.get(conversationID) === requestState) {
+        pendingMarkReadRequests.delete(conversationID);
+      }
+    }
+  },
   getUnReadCountByReq: async () => {
     try {
-      const { data } = await IMSDK.getTotalUnreadMsgCount();
+      const { data } = await scheduleIMSDKRequest(
+        () => IMSDK.getTotalUnreadMsgCount(),
+        { priority: "normal" },
+      );
       set(() => ({ unReadCount: data }));
       return data;
     } catch (error) {
       console.error(error);
-      return 0;
+      return get().unReadCount;
     }
   },
   updateUnReadCount: (count: number) => {
@@ -140,6 +271,9 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
       groupInfo = data[0];
     } catch (error) {
       feedbackToast({ error, msg: t("toast.getGroupInfoFailed") });
+      return;
+    }
+    if (get().currentConversation?.groupID !== groupID) {
       return;
     }
     set(() => ({ currentGroupInfo: { ...groupInfo } }));
@@ -213,6 +347,7 @@ export const useConversationStore = create<ConversationStore>()((set, get) => ({
   clearConversationStore: () => {
     set(() => ({
       conversationList: [],
+      isSyncing: false,
       currentConversation: undefined,
       unReadCount: 0,
       currentGroupInfo: undefined,

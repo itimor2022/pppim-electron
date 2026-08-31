@@ -137,13 +137,48 @@ const ChooseModal: ForwardRefRenderFunction<OverlayVisibleHandle, IChooseModalPr
             adminUserIDs: [],
           });
           break;
-        case "INVITE_TO_GROUP":
+        case "INVITE_TO_GROUP": {
+          const selectedUserIDs = [
+            ...new Set(
+              choosedList.flatMap((item) => (item.userID ? [item.userID] : [])),
+            ),
+          ];
+          let existingUserIDs: string[];
+          try {
+            const { data: existingMembers } = await IMSDK.getSpecifiedGroupMembersInfo({
+              groupID: extraData as string,
+              userIDList: selectedUserIDs,
+            });
+            existingUserIDs = existingMembers.map((item) => item.userID);
+          } catch (error) {
+            feedbackToast({
+              error,
+              msg: t("toast.checkGroupMembersFailed"),
+            });
+            setLoading(false);
+            return;
+          }
+
+          const existingUserIDSet = new Set(existingUserIDs);
+          const inviteUserIDs = selectedUserIDs.filter(
+            (userID) => !existingUserIDSet.has(userID),
+          );
+          if (!inviteUserIDs.length) {
+            message.warning(t("toast.selectedUsersAlreadyInGroup"));
+            setLoading(false);
+            return;
+          }
+
           await IMSDK.inviteUserToGroup({
             groupID: extraData as string,
-            userIDList: choosedList.map((item) => item.userID!),
+            userIDList: inviteUserIDs,
             reason: "",
           });
+          if (inviteUserIDs.length < selectedUserIDs.length) {
+            message.warning(t("toast.existingGroupMembersSkipped"));
+          }
           break;
+        }
         case "KICK_FORM_GROUP":
           await IMSDK.kickGroupMember({
             groupID: extraData as string,
@@ -157,7 +192,10 @@ const ChooseModal: ForwardRefRenderFunction<OverlayVisibleHandle, IChooseModalPr
             newOwnerUserID: choosedList[0].userID!,
           });
           break;
-        case "SELECT_CARD":
+        case "SELECT_CARD": {
+          const targetConversation =
+            useConversationStore.getState().currentConversation;
+          if (!targetConversation) break;
           sendMessage({
             message: (
               await IMSDK.createCardMessage({
@@ -167,8 +205,11 @@ const ChooseModal: ForwardRefRenderFunction<OverlayVisibleHandle, IChooseModalPr
                 ex: choosedList[0].ex ?? "",
               })
             ).data,
+            recvID: targetConversation.userID,
+            groupID: targetConversation.groupID,
           });
           break;
+        }
         case "FORWARD_MESSAGE":
         case "SHARE_CARD":
         case "MEETING_INVITE":

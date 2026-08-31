@@ -241,19 +241,43 @@ const OnlineOrTypingStatus = ({ userID }: { userID: string }) => {
   );
 
   useEffect(() => {
+    let disposed = false;
+    let subscriptionReady = false;
     const userStatusChangeHandler = ({ data }: WSEvent<UserOnlineState>) => {
       if (data.userID === userID) {
         setOnlineState(data);
       }
     };
+    setOnlineState(undefined);
+
+    if (!showUserOnlineStatus || !userID) {
+      return () => setTyping(false);
+    }
+
     IMSDK.on(CbEvents.OnUserStatusChanged, userStatusChangeHandler);
-    IMSDK.subscribeUsersStatus([userID]).then(({ data }) => setOnlineState(data[0]));
+    const subscribeTimer = window.setTimeout(() => {
+      void IMSDK.subscribeUsersStatus([userID])
+        .then(({ data }) => {
+          if (disposed) {
+            return IMSDK.unsubscribeUsersStatus([userID]);
+          }
+          subscriptionReady = true;
+          setOnlineState(data[0]);
+        })
+        .catch((error) => {
+          if (!disposed) console.error("subscribe user status failed", error);
+        });
+    }, 250);
     return () => {
+      disposed = true;
+      window.clearTimeout(subscribeTimer);
       IMSDK.off(CbEvents.OnUserStatusChanged, userStatusChangeHandler);
-      IMSDK.unsubscribeUsersStatus([userID]);
+      if (subscriptionReady) {
+        void IMSDK.unsubscribeUsersStatus([userID]).catch(() => undefined);
+      }
       setTyping(false);
     };
-  }, [userID]);
+  }, [showUserOnlineStatus, userID]);
 
   useEffect(() => {
     const typingHandler = () => {

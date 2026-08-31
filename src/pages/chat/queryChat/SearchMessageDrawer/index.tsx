@@ -81,6 +81,7 @@ const SearchMessageDrawer: ForwardRefRenderFunction<OverlayVisibleHandle, unknow
       rootClassName="chat-drawer"
       onClose={closeOverlay}
       open={isOverlayOpen}
+      destroyOnHidden
       maskClassName="opacity-0"
       maskMotion={{
         visible: false,

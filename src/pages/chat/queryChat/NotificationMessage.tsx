@@ -6,14 +6,13 @@ import { FC, memo, useEffect, useRef } from "react";
 import {
   ExMessageItem,
   useConversationStore,
-  useMessageStore,
   useUserStore,
 } from "@/store";
 import { formatMessageTime, notificationMessageFormat } from "@/utils/imCommon";
+import { queueMessageUpdate } from "@/utils/messageUpdateBatcher";
 
 const NotificationMessage: FC<{ message: ExMessageItem }> = ({ message }) => {
   const messageWrapRef = useRef<HTMLDivElement>(null);
-  const updateMessage = useMessageStore((state) => state.updateOneMessage);
   const revokeMap = useConversationStore((state) => state.revokeMap);
   const showEdit = Boolean(revokeMap[message.clientMsgID]);
 
@@ -26,7 +25,7 @@ const NotificationMessage: FC<{ message: ExMessageItem }> = ({ message }) => {
 
   useEffect(() => {
     if (inViewport && message.isAppend) {
-      updateMessage({
+      queueMessageUpdate({
         clientMsgID: message.clientMsgID,
         isAppend: false,
       } as ExMessageItem);

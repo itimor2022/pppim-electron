@@ -15,7 +15,7 @@ import favorite_add from "@/assets/images/chatFooter/favorite_add.png";
 import { insertAtCursor } from "@/components/EditableDiv";
 import { parseTwemoji } from "@/components/Twemoji";
 import { IMSDK } from "@/layout/MainContentWrap";
-import { ExMessageItem } from "@/store";
+import { ExMessageItem, useConversationStore } from "@/store";
 import { getUserCustomEmojis, setUserCustomEmojis } from "@/utils/storage";
 
 import { CustomEmojiItem } from "../../MessageItem/FaceMessageRender";
@@ -23,13 +23,8 @@ import { useSendMessage } from "../useSendMessage";
 import { FileWithPath } from "./useFileMessage";
 
 const getEmojiDataSource = () => {
-  const electronPublicPath = window.electronAPI?.getDataPath("public");
-  if (electronPublicPath) {
-    return `${electronPublicPath}/emojis.json`;
-  }
-  const basePath = import.meta.env.BASE_URL || "./";
-  const normalizedBasePath = basePath.endsWith("/") ? basePath : `${basePath}/`;
-  return `${normalizedBasePath}emojis.json`;
+  const webBaseUrl = new URL(import.meta.env.BASE_URL, window.location.href);
+  return new URL("emojis.json", webBaseUrl).toString();
 };
 
 const emojiPicker = new Picker({
@@ -134,13 +129,20 @@ const CustomTabPane = () => {
   }, []);
 
   const sendCustomEmoji = async (item: CustomEmojiItem) => {
+    const targetConversation =
+      useConversationStore.getState().currentConversation;
+    if (!targetConversation) return;
     const message = (
       await IMSDK.createFaceMessage({
         index: -1,
         data: JSON.stringify(item),
       })
     ).data;
-    sendMessage({ message });
+    sendMessage({
+      message,
+      recvID: targetConversation.userID,
+      groupID: targetConversation.groupID,
+    });
   };
 
   const fileHandle = async (options: UploadRequestOption) => {

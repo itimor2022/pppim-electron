@@ -15,11 +15,21 @@ const MessageSearchBar: ForwardRefRenderFunction<
   { triggerSearch: (keyword: string) => void }
 > = ({ triggerSearch }, ref) => {
   const [keyword, setKeyword] = useState("");
-  const { run: debounceSearch } = useDebounceFn(() => triggerSearch(keyword), {
-    wait: 500,
-  });
+  const { run: debounceSearch, cancel: cancelSearch } = useDebounceFn(
+    (value: string) => triggerSearch(value),
+    { wait: 500 },
+  );
 
-  useImperativeHandle(ref, () => ({ clear: () => setKeyword("") }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      clear: () => {
+        cancelSearch();
+        setKeyword("");
+      },
+    }),
+    [cancelSearch],
+  );
 
   return (
     <div className="px-5.5">
@@ -28,8 +38,9 @@ const MessageSearchBar: ForwardRefRenderFunction<
         allowClear
         spellCheck={false}
         onChange={(e) => {
-          setKeyword(e.target.value);
-          debounceSearch();
+          const value = e.target.value;
+          setKeyword(value);
+          debounceSearch(value);
         }}
         placeholder={t("placeholder.search")!}
         prefix={<SearchOutlined rev={undefined} />}

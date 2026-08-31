@@ -7,6 +7,7 @@ import {
   forwardRef,
   ForwardRefRenderFunction,
   memo,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -47,6 +48,8 @@ const AtSearchPanel: ForwardRefRenderFunction<
   const [activeUserID, setActiveUserID] = useState("");
   const [searchData, setSearchData] = useState<GroupMemberItem[]>([]);
   const latestOpen = useLatest(open);
+  const searchGeneration = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
   const { isAdmin, isOwner } = useCurrentMemberRole();
   const showGroupAllMembers = useUserStore(
     (state) => Number(state.appConfig.showGroupAllMembers ?? 1) === 1,
@@ -54,10 +57,15 @@ const AtSearchPanel: ForwardRefRenderFunction<
 
   const canAtAll = isAdmin || isOwner;
   const shouldLimitVisibleMembers = !showGroupAllMembers && !canAtAll;
-  const filterMembers = (list: GroupMemberItem[]) =>
-    shouldLimitVisibleMembers
-      ? list.filter((member) => member.roleLevel === 100 || member.roleLevel === 60)
-      : list;
+  const filterMembers = useCallback(
+    (list: GroupMemberItem[]) =>
+      shouldLimitVisibleMembers
+        ? list.filter(
+            (member) => member.roleLevel === 100 || member.roleLevel === 60,
+          )
+        : list,
+    [shouldLimitVisibleMembers],
+  );
 
   const { runAsync: requestSearchMembers, loading: searchLoading } = useRequest(
     IMSDK.searchGroupMembers,
@@ -84,30 +92,72 @@ const AtSearchPanel: ForwardRefRenderFunction<
     }
   }, [activeUserID]);
 
-  const searchMember = async (keyword: string) => {
-    try {
-      const options = {
-        groupID: useConversationStore.getState().currentConversation?.groupID ?? "",
-        offset: 0,
-        count: 50,
-        filter: 0,
-        keywordList: [keyword],
-        isSearchMemberNickname: true,
-        isSearchUserID: false,
-      };
-      let memberList = [] as GroupMemberItem[];
-      if (keyword) {
-        memberList = (await requestSearchMembers(options)).data;
-      } else {
-        memberList = (await requestMemberList(options)).data;
+  const executeSearchMember = useCallback(
+    async (keyword: string, generation: number) => {
+      const groupID =
+        useConversationStore.getState().currentConversation?.groupID ?? "";
+      if (!groupID) return;
+
+      try {
+        const options = {
+          groupID,
+          offset: 0,
+          count: 50,
+          filter: 0,
+          keywordList: [keyword],
+          isSearchMemberNickname: true,
+          isSearchUserID: false,
+        };
+        let memberList = [] as GroupMemberItem[];
+        if (keyword) {
+          memberList = (await requestSearchMembers(options)).data;
+        } else {
+          memberList = (await requestMemberList(options)).data;
+        }
+        if (
+          generation !== searchGeneration.current ||
+          !latestOpen.current ||
+          useConversationStore.getState().currentConversation?.groupID !== groupID
+        ) {
+          return;
+        }
+        memberList = filterMembers(memberList);
+        setSearchData([...memberList]);
+        setActiveUserID(canAtAll && !keyword ? AT_ALL_KEY : memberList[0]?.userID);
+      } catch (error) {
+        if (generation !== searchGeneration.current) return;
+        setSearchData([]);
       }
-      memberList = filterMembers(memberList);
-      setSearchData([...memberList]);
-      setActiveUserID(canAtAll && !keyword ? AT_ALL_KEY : memberList[0]?.userID);
-    } catch (error) {
-      setSearchData([]);
+    },
+    [canAtAll, filterMembers, latestOpen, requestMemberList, requestSearchMembers],
+  );
+
+  const searchMember = useCallback(
+    (keyword: string) => {
+      if (searchTimer.current) {
+        clearTimeout(searchTimer.current);
+      }
+      const generation = ++searchGeneration.current;
+      searchTimer.current = setTimeout(
+        () => {
+          searchTimer.current = undefined;
+          void executeSearchMember(keyword, generation);
+        },
+        keyword ? 250 : 0,
+      );
+      return Promise.resolve();
+    },
+    [executeSearchMember],
+  );
+
+  useEffect(() => {
+    if (open) return;
+    searchGeneration.current += 1;
+    if (searchTimer.current) {
+      clearTimeout(searchTimer.current);
+      searchTimer.current = undefined;
     }
-  };
+  }, [open]);
 
   useKeyPress("uparrow", () => {
     const idx = searchData.findIndex((item) => item.userID === activeUserID);
@@ -158,7 +208,7 @@ const AtSearchPanel: ForwardRefRenderFunction<
     () => ({
       searchMember,
     }),
-    [],
+    [searchMember],
   );
 
   const listLoading = loading || searchLoading;

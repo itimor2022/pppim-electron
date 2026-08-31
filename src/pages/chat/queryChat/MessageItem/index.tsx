@@ -18,6 +18,7 @@ import {
 } from "@/store";
 import emitter from "@/utils/events";
 import { formatMessageTime } from "@/utils/imCommon";
+import { queueMessageUpdate } from "@/utils/messageUpdateBatcher";
 
 import AnnouncementRenderer from "./AnnouncementRender";
 import CardMessageRenderer from "./CardMessageRenderer";
@@ -151,8 +152,7 @@ const MessageItem: FC<IMessageItemProps> = ({
     if (message.sessionType === SessionType.Single) {
       updateFields.isRead = true;
     }
-    updateMessage(updateFields);
-    updateAppendCount?.();
+    queueMessageUpdate(updateFields, updateAppendCount);
   };
 
   const updateMessageReadState = () => {
@@ -167,7 +167,7 @@ const MessageItem: FC<IMessageItemProps> = ({
       queueGroupReadReceipt(conversationID ?? "", message.clientMsgID);
     }
 
-    updateMessage({
+    queueMessageUpdate({
       clientMsgID: message.clientMsgID,
       isRead: true,
     } as ExMessageItem);

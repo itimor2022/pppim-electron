@@ -1,8 +1,7 @@
 import "xgplayer/dist/index.min.css";
 
-import { memo, useEffect } from "react";
-import { SimplePlayer } from "xgplayer";
-import { I18N } from "xgplayer";
+import { memo, useEffect, useRef } from "react";
+import { I18N, SimplePlayer } from "xgplayer";
 import ZH from "xgplayer/es/lang/zh-cn";
 import Error from "xgplayer/es/plugins/error";
 import Fullscreen from "xgplayer/es/plugins/fullscreen";
@@ -24,17 +23,39 @@ const VideoPlayer = ({
   autoplay?: boolean;
   poster?: string;
 }) => {
+  const autoplayRef = useRef(autoplay);
+  const posterRef = useRef(poster);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  autoplayRef.current = autoplay;
+  posterRef.current = poster;
+
   useEffect(() => {
-    new SimplePlayer({
-      id: "video_player",
+    const playerContainer = playerContainerRef.current;
+    if (!playerContainer) return;
+
+    const player = new SimplePlayer({
+      el: playerContainer,
       url,
-      autoplay,
-      poster,
+      autoplay: autoplayRef.current,
+      poster: posterRef.current,
       plugins: [Start, PC, Mobile, Progress, Play, Time, Error, Fullscreen],
     });
+
+    return () => {
+      player.pause();
+      playerContainer
+        .querySelectorAll<HTMLMediaElement>("video,audio")
+        .forEach((media) => {
+          media.pause();
+          media.removeAttribute("src");
+          media.load();
+        });
+      player.destroy();
+      playerContainer.innerHTML = "";
+    };
   }, [url]);
 
-  return <div id="video_player" />;
+  return <div ref={playerContainerRef} />;
 };
 
 export default memo(VideoPlayer);

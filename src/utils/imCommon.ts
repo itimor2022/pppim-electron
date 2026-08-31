@@ -554,8 +554,31 @@ export const formatMessageByType = (message: MessageItem): string => {
   }
 };
 
+let storeInitializationGeneration = 0;
+const BACKGROUND_STORE_IDLE_MS = 10_000;
+let lastStoreInteractionAt = Date.now();
+let storeInteractionListenersInstalled = false;
+
+const installStoreInteractionListeners = () => {
+  if (storeInteractionListenersInstalled) return;
+  storeInteractionListenersInstalled = true;
+  const markInteraction = () => {
+    lastStoreInteractionAt = Date.now();
+  };
+  window.addEventListener("click", markInteraction, true);
+  window.addEventListener("keydown", markInteraction, true);
+  window.addEventListener("pointerdown", markInteraction, true);
+  window.addEventListener("wheel", markInteraction, { capture: true, passive: true });
+};
+
 export const initStore = () => {
-  calcApplicationBadge();
+  const generation = ++storeInitializationGeneration;
+  lastStoreInteractionAt = Date.now();
+  installStoreInteractionListeners();
+  const isCurrentInitialization = () =>
+    generation === storeInitializationGeneration &&
+    !window.location.hash.startsWith("#/login");
+  void calcApplicationBadge();
   const { getSelfInfoByReq, getWorkMomentsUnreadCount } = useUserStore.getState();
   const {
     getFriendListByReq,
@@ -569,46 +592,128 @@ export const initStore = () => {
   const { getConversationListByReq, getUnReadCountByReq } =
     useConversationStore.getState();
 
-  getConversationListByReq();
   getSelfInfoByReq();
-  getFriendListByReq();
-  getBlackListByReq();
-  getGroupListByReq();
-  getRecvFriendApplicationListByReq();
-  getRecvGroupApplicationListByReq();
-  getSendFriendApplicationListByReq();
-  getSendGroupApplicationListByReq();
-  getWorkMomentsUnreadCount();
-  getUnReadCountByReq().then((count) =>
-    window.electronAPI?.ipcInvoke("updateUnreadCount", count),
-  );
+  void getWorkMomentsUnreadCount();
+
+  void getConversationListByReq().finally(() => {
+    if (!isCurrentInitialization()) return;
+
+    void getUnReadCountByReq().then((count) =>
+      window.electronAPI?.ipcInvoke("updateUnreadCount", count),
+    );
+
+    const backgroundInitializers = [
+      getFriendListByReq,
+      getGroupListByReq,
+      getBlackListByReq,
+      getRecvFriendApplicationListByReq,
+      getRecvGroupApplicationListByReq,
+      getSendFriendApplicationListByReq,
+      getSendGroupApplicationListByReq,
+    ];
+    let initializerIndex = 0;
+    const scheduleNextInitializer = () => {
+      if (!isCurrentInitialization()) return;
+      const isContactPage = window.location.hash.startsWith("#/contact");
+      const idleDelay = isContactPage
+        ? 0
+        : Math.max(0, BACKGROUND_STORE_IDLE_MS - (Date.now() - lastStoreInteractionAt));
+      window.setTimeout(runNextInitializer, idleDelay);
+    };
+    const runNextInitializer = () => {
+      if (
+        !isCurrentInitialization() ||
+        initializerIndex >= backgroundInitializers.length
+      ) {
+        return;
+      }
+      if (
+        !window.location.hash.startsWith("#/contact") &&
+        Date.now() - lastStoreInteractionAt < BACKGROUND_STORE_IDLE_MS
+      ) {
+        scheduleNextInitializer();
+        return;
+      }
+      const initializer = backgroundInitializers[initializerIndex++];
+      void initializer().finally(() => {
+        scheduleNextInitializer();
+      });
+    };
+    scheduleNextInitializer();
+  });
+};
+
+const compareConversation = (a: ConversationItem, b: ConversationItem) => {
+  if (a.isPinned === b.isPinned) {
+    const aCompare = a.draftText
+      ? Math.max(a.draftTextTime, a.latestMsgSendTime)
+      : a.latestMsgSendTime;
+    const bCompare = b.draftText
+      ? Math.max(b.draftTextTime, b.latestMsgSendTime)
+      : b.latestMsgSendTime;
+    if (aCompare > bCompare) return -1;
+    if (aCompare < bCompare) return 1;
+    return 0;
+  }
+  return a.isPinned && !b.isPinned ? -1 : 1;
 };
 
 export const conversationSort = (conversationList: ConversationItem[]) => {
-  const arr: string[] = [];
-  const filterArr = conversationList.filter(
-    (c) => !arr.includes(c.conversationID) && arr.push(c.conversationID),
-  );
-  filterArr.sort((a, b) => {
-    if (a.isPinned === b.isPinned) {
-      const aCompare =
-        a.draftTextTime > a.latestMsgSendTime ? a.draftTextTime : a.latestMsgSendTime;
-      const bCompare =
-        b.draftTextTime > b.latestMsgSendTime ? b.draftTextTime : b.latestMsgSendTime;
-      if (aCompare > bCompare) {
-        return -1;
-      } else if (aCompare < bCompare) {
-        return 1;
-      } else {
-        return 0;
-      }
-    } else if (a.isPinned && !b.isPinned) {
-      return -1;
-    } else {
-      return 1;
+  const conversationIDs = new Set<string>();
+  const filterArr = conversationList.filter((conversation) => {
+    if (conversationIDs.has(conversation.conversationID)) {
+      return false;
     }
+    conversationIDs.add(conversation.conversationID);
+    return true;
   });
+  filterArr.sort(compareConversation);
   return filterArr;
+};
+
+export const mergeConversationList = (
+  currentList: ConversationItem[],
+  changedList: ConversationItem[],
+) => {
+  if (!changedList.length) return currentList;
+
+  const changedConversationIDs = new Set<string>();
+  const uniqueChangedList = changedList.filter((conversation) => {
+    if (changedConversationIDs.has(conversation.conversationID)) return false;
+    changedConversationIDs.add(conversation.conversationID);
+    return true;
+  });
+  uniqueChangedList.sort(compareConversation);
+
+  const unchangedList = currentList.filter(
+    (conversation) => !changedConversationIDs.has(conversation.conversationID),
+  );
+  const mergedList: ConversationItem[] = [];
+  let currentIndex = 0;
+  let changedIndex = 0;
+
+  while (
+    currentIndex < unchangedList.length &&
+    changedIndex < uniqueChangedList.length
+  ) {
+    if (
+      compareConversation(
+        uniqueChangedList[changedIndex],
+        unchangedList[currentIndex],
+      ) <= 0
+    ) {
+      mergedList.push(uniqueChangedList[changedIndex]);
+      changedIndex += 1;
+    } else {
+      mergedList.push(unchangedList[currentIndex]);
+      currentIndex += 1;
+    }
+  }
+
+  return mergedList.concat(
+    unchangedList.slice(currentIndex),
+    uniqueChangedList.slice(changedIndex),
+  );
 };
 
 export const isGroupSession = (sessionType?: SessionType) =>

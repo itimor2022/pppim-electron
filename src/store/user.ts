@@ -17,6 +17,47 @@ import { useContactStore } from "./contact";
 import { useConversationStore } from "./conversation";
 import { AppConfig, AppSettings, UserStore } from "./type";
 
+const SDK_LOGOUT_TIMEOUT_MS = 3000;
+const IMAGE_CACHE_BATCH_DELAY_MS = 50;
+
+let logoutTask: Promise<void> | undefined;
+let imageCacheFlushTimer: ReturnType<typeof setTimeout> | undefined;
+let imageCachePersistenceRunning = false;
+let pendingImageCachePersistence: Record<string, string> | undefined;
+const pendingImageCacheAdditions = new Map<string, string>();
+
+const persistLatestImageCache = (cache: Record<string, string>) => {
+  pendingImageCachePersistence = cache;
+  if (imageCachePersistenceRunning) return;
+
+  imageCachePersistenceRunning = true;
+  void (async () => {
+    while (pendingImageCachePersistence) {
+      const latestCache = pendingImageCachePersistence;
+      pendingImageCachePersistence = undefined;
+      try {
+        await setImageCache(latestCache);
+      } catch (error) {
+        console.error("persist image cache failed", error);
+      }
+    }
+    imageCachePersistenceRunning = false;
+  })();
+};
+
+const flushPendingImageCacheAdditions = () => {
+  imageCacheFlushTimer = undefined;
+  if (!pendingImageCacheAdditions.size) return;
+
+  const additions = Object.fromEntries(pendingImageCacheAdditions);
+  pendingImageCacheAdditions.clear();
+  useUserStore.setState((state) => {
+    const imageCache = { ...state.imageCache, ...additions };
+    persistLatestImageCache(imageCache);
+    return { imageCache };
+  });
+};
+
 export const useUserStore = create<UserStore>()((set, get) => ({
   selfInfo: {} as BusinessUserInfo,
   appConfig: {} as AppConfig,
@@ -79,14 +120,38 @@ export const useUserStore = create<UserStore>()((set, get) => ({
     }
     set((state) => ({ appSettings: { ...state.appSettings, ...settings } }));
   },
-  userLogout: async (force?: boolean) => {
-    if (!force) await IMSDK.logout();
-    clearIMProfile();
-    set({ selfInfo: {} as BusinessUserInfo });
-    useContactStore.getState().clearContactStore();
-    useConversationStore.getState().clearConversationStore();
-    window.electronAPI?.ipcInvoke("updateUnreadCount", 0);
-    router.navigate("/login");
+  userLogout: (force?: boolean) => {
+    if (logoutTask) return logoutTask;
+
+    logoutTask = (async () => {
+      let logoutTimeout: ReturnType<typeof setTimeout> | undefined;
+      if (!force) {
+        try {
+          await Promise.race([
+            IMSDK.logout(),
+            new Promise<never>((_, reject) => {
+              logoutTimeout = setTimeout(
+                () => reject(new Error("SDK logout timed out")),
+                SDK_LOGOUT_TIMEOUT_MS,
+              );
+            }),
+          ]);
+        } catch (error) {
+          console.error("sdk logout failed", error);
+        } finally {
+          if (logoutTimeout) clearTimeout(logoutTimeout);
+        }
+      }
+      await clearIMProfile();
+      set({ selfInfo: {} as BusinessUserInfo });
+      useContactStore.getState().clearContactStore();
+      useConversationStore.getState().clearConversationStore();
+      window.electronAPI?.ipcInvoke("updateUnreadCount", 0);
+      router.navigate("/login", { replace: true });
+    })().finally(() => {
+      logoutTask = undefined;
+    });
+    return logoutTask;
   },
   getWorkMomentsUnreadCount: async () => {
     try {
@@ -103,13 +168,27 @@ export const useUserStore = create<UserStore>()((set, get) => ({
     set(() => ({ imageCache: cache }));
   },
   addImageCache: (url: string, path: string) => {
-    const newCache = { ...get().imageCache };
-    newCache[url] = path;
-    setImageCache(newCache);
-    set(() => ({ imageCache: newCache }));
+    if (
+      pendingImageCacheAdditions.get(url) === path ||
+      (!pendingImageCacheAdditions.has(url) && get().imageCache[url] === path)
+    ) {
+      return;
+    }
+    pendingImageCacheAdditions.set(url, path);
+    if (!imageCacheFlushTimer) {
+      imageCacheFlushTimer = setTimeout(
+        flushPendingImageCacheAdditions,
+        IMAGE_CACHE_BATCH_DELAY_MS,
+      );
+    }
   },
   clearImageCache: () => {
-    setImageCache({});
+    if (imageCacheFlushTimer) {
+      clearTimeout(imageCacheFlushTimer);
+      imageCacheFlushTimer = undefined;
+    }
+    pendingImageCacheAdditions.clear();
+    persistLatestImageCache({});
     set({ imageCache: {} });
   },
 }));

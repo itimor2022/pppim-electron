@@ -17,7 +17,7 @@ import {
 
 export function useMessageReceipt() {
   const selfUserID = useUserStore((state) => state.selfInfo.userID);
-  const updateOneMessage = useMessageStore((state) => state.updateOneMessage);
+  const updateMessages = useMessageStore((state) => state.updateMessages);
 
   useEffect(() => {
     setIMListener();
@@ -43,14 +43,16 @@ export function useMessageReceipt() {
     )
       return;
 
-    data.map((receipt) => {
-      (receipt.msgIDList ?? []).map((clientMsgID: string) => {
-        updateOneMessage({
-          clientMsgID,
-          isRead: true,
-        } as ExMessageItem);
-      });
-    });
+    const updates = data.flatMap((receipt) =>
+      (receipt.msgIDList ?? []).map(
+        (clientMsgID: string) =>
+          ({
+            clientMsgID,
+            isRead: true,
+          } as ExMessageItem),
+      ),
+    );
+    updateMessages(updates);
   };
 
   const groupMessageHasReadedHander = ({ data }: WSEvent<GroupMessageReceiptInfo>) => {
@@ -60,17 +62,19 @@ export function useMessageReceipt() {
     )
       return;
 
-    data.groupMessageReadInfo.map((receipt) => {
+    const currentMessageMap = new Map(
+      useMessageStore
+        .getState()
+        .historyMessageList.map((message) => [message.clientMsgID, message]),
+    );
+    const updates = data.groupMessageReadInfo.map((receipt) => {
       const hasSelfRead = receipt.readMembers?.some(
         (member) => member.userID === selfUserID,
       );
-      const oldMessage = useMessageStore
-        .getState()
-        .historyMessageList.find(
-          (message) => message.clientMsgID === receipt.clientMsgID,
-        );
-      updateOneMessage({
+      const oldMessage = currentMessageMap.get(receipt.clientMsgID);
+      return {
         ...oldMessage,
+        clientMsgID: receipt.clientMsgID,
         isRead: hasSelfRead ? true : oldMessage?.isRead,
         attachedInfoElem: {
           ...oldMessage?.attachedInfoElem,
@@ -79,7 +83,8 @@ export function useMessageReceipt() {
             unreadCount: receipt.unreadCount,
           },
         },
-      } as ExMessageItem);
+      } as ExMessageItem;
     });
+    updateMessages(updates);
   };
 }

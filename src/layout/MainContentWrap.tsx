@@ -1,4 +1,3 @@
-import { getSDK } from "open-im-sdk-wasm";
 import { AllowType } from "open-im-sdk-wasm";
 import { useEffect } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -6,57 +5,115 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useConversationStore, useUserStore } from "@/store";
 import emitter from "@/utils/events";
 import { checkNotificationPermission } from "@/utils/imCommon";
+import { createIMSDKWorkerBridge } from "@/utils/imSdkWorkerBridge";
 import { getImageCache, getIMToken, getIMUserID } from "@/utils/storage";
 
 import { useAutoUpdate } from "./useAutoUpdate";
 
-const isElectronProd = import.meta.env.MODE !== "development" && window.electronAPI;
 const OPENIM_WASM_CACHE_KEY = "openim-wasm-cache";
-const OPENIM_WASM_VERSION = "send-message-compat-20260416";
+const OPENIM_WASM_VERSION = "send-message-args-20260428";
+const GROUP_MEMBER_REQUEST_MAX_CONCURRENCY = 4;
+const GROUP_MEMBER_REQUEST_TIMEOUT_MS = 20_000;
 
-type WSSendMessage = ((...args: unknown[]) => unknown) & {
-  __openIMSendMessageCompat?: boolean;
-};
+const installGroupMemberRequestScheduler = () => {
+  const schedulerWindow = window as typeof window & {
+    __openimGroupMemberRequestSchedulerInstalled?: boolean;
+  };
+  if (schedulerWindow.__openimGroupMemberRequestSchedulerInstalled) return;
+  schedulerWindow.__openimGroupMemberRequestSchedulerInstalled = true;
 
-type WindowWithWasmSendMessage = Window & {
-  sendMessage?: WSSendMessage;
-  __openIMSendMessageCompatInstalled?: boolean;
-};
+  const rawFetch = window.fetch.bind(window);
+  const pendingRequests: Array<{
+    input: RequestInfo | URL;
+    init?: RequestInit;
+    signal?: AbortSignal;
+    abortHandler?: () => void;
+    resolve: (response: Response) => void;
+    reject: (reason?: unknown) => void;
+  }> = [];
+  let activeRequests = 0;
 
-const wrapWasmSendMessage = (sendMessage?: WSSendMessage) => {
-  if (typeof sendMessage !== "function" || sendMessage.__openIMSendMessageCompat) {
-    return sendMessage;
-  }
+  const runPendingRequests = () => {
+    while (
+      activeRequests < GROUP_MEMBER_REQUEST_MAX_CONCURRENCY &&
+      pendingRequests.length
+    ) {
+      const request = pendingRequests.shift();
+      if (!request) return;
+      if (request.signal?.aborted) {
+        if (request.abortHandler) {
+          request.signal.removeEventListener("abort", request.abortHandler);
+        }
+        request.reject(new DOMException("The operation was aborted.", "AbortError"));
+        continue;
+      }
+      if (request.abortHandler) {
+        request.signal?.removeEventListener("abort", request.abortHandler);
+      }
+      activeRequests += 1;
+      const controller = new AbortController();
+      let didTimeout = false;
+      const abortActiveRequest = () => controller.abort(request.signal?.reason);
+      request.signal?.addEventListener("abort", abortActiveRequest, { once: true });
+      const timeout = setTimeout(() => {
+        didTimeout = true;
+        controller.abort();
+      }, GROUP_MEMBER_REQUEST_TIMEOUT_MS);
+      rawFetch(request.input, {
+        ...request.init,
+        signal: controller.signal,
+      })
+        .then(request.resolve)
+        .catch((error) => {
+          if (didTimeout) {
+            request.reject(
+              new DOMException("Group member request timed out.", "TimeoutError"),
+            );
+            return;
+          }
+          request.reject(error);
+        })
+        .finally(() => {
+          clearTimeout(timeout);
+          request.signal?.removeEventListener("abort", abortActiveRequest);
+          activeRequests -= 1;
+          runPendingRequests();
+        });
+    }
+  };
 
-  const compatibleSendMessage = ((...args: unknown[]) =>
-    sendMessage(...(args.length === 6 ? [...args, false] : args))) as WSSendMessage;
-  compatibleSendMessage.__openIMSendMessageCompat = true;
-  return compatibleSendMessage;
-};
-
-const installSendMessageWasmCompat = () => {
-  if (typeof window === "undefined") return;
-
-  const wasmWindow = window as WindowWithWasmSendMessage;
-  if (wasmWindow.__openIMSendMessageCompatInstalled) return;
-  wasmWindow.__openIMSendMessageCompatInstalled = true;
-
-  const descriptor = Object.getOwnPropertyDescriptor(wasmWindow, "sendMessage");
-  let sendMessage = wrapWasmSendMessage(wasmWindow.sendMessage);
-
-  if (descriptor && !descriptor.configurable) {
-    wasmWindow.sendMessage = sendMessage;
-    return;
-  }
-
-  Object.defineProperty(wasmWindow, "sendMessage", {
-    configurable: true,
-    enumerable: descriptor?.enumerable ?? true,
-    get: () => sendMessage,
-    set: (value?: WSSendMessage) => {
-      sendMessage = wrapWasmSendMessage(value);
-    },
-  });
+  window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const requestURL =
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (!/\/group\/get_group_member_list(?:$|[?#])/.test(requestURL)) {
+      return rawFetch(input, init);
+    }
+    return new Promise<Response>((resolve, reject) => {
+      const signal =
+        init?.signal ?? (input instanceof Request ? input.signal : undefined);
+      if (signal?.aborted) {
+        reject(new DOMException("The operation was aborted.", "AbortError"));
+        return;
+      }
+      const request = { input, init, signal, resolve, reject } as {
+        input: RequestInfo | URL;
+        init?: RequestInit;
+        signal?: AbortSignal;
+        abortHandler?: () => void;
+        resolve: (response: Response) => void;
+        reject: (reason?: unknown) => void;
+      };
+      request.abortHandler = () => {
+        const requestIndex = pendingRequests.indexOf(request);
+        if (requestIndex < 0) return;
+        pendingRequests.splice(requestIndex, 1);
+        reject(new DOMException("The operation was aborted.", "AbortError"));
+      };
+      signal?.addEventListener("abort", request.abortHandler, { once: true });
+      pendingRequests.push(request);
+      runPendingRequests();
+    });
+  }) as typeof window.fetch;
 };
 
 const clearOpenIMWasmCache = () => {
@@ -80,12 +137,13 @@ const getWasmPath = (fileName: string, version?: string) => {
   return withResourceVersion(`${prefix}${fileName}`, version);
 };
 
-installSendMessageWasmCompat();
 clearOpenIMWasmCache();
+installGroupMemberRequestScheduler();
 
-export const IMSDK = getSDK({
+export const IMSDK = createIMSDKWorkerBridge({
   coreWasmPath: getWasmPath("openIM.wasm", OPENIM_WASM_VERSION),
   sqlWasmPath: getWasmPath("sql-wasm.wasm"),
+  wasmExecPath: getWasmPath("wasm_exec.js"),
 });
 
 export const MainContentWrap = () => {
@@ -135,15 +193,20 @@ export const MainContentWrap = () => {
   useEffect(() => {
     const initSettingStore = async () => {
       if (!window.electronAPI) return;
-      updateAppSettings({
-        closeAction:
-          (await window.electronAPI?.ipcInvoke("getKeyStore", {
-            key: "closeAction",
-          })) || "miniSize",
-      });
-      const cache = await getImageCache();
-      initImageCache(cache);
-      window.electronAPI?.ipcInvoke("main-win-ready");
+      try {
+        updateAppSettings({
+          closeAction:
+            (await window.electronAPI.ipcInvoke("getKeyStore", {
+              key: "closeAction",
+            })) || "miniSize",
+        });
+        const cache = await getImageCache();
+        initImageCache(cache);
+      } catch (error) {
+        console.error("initialize app settings failed", error);
+      } finally {
+        window.electronAPI.ipcInvoke("main-win-ready");
+      }
     };
 
     initSettingStore();

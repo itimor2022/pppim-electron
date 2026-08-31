@@ -39,7 +39,9 @@ const MomentsMediaRow = ({ moments }: { moments: WorkMoments }) => {
       );
     }
     const downloadSuccessHandler = (url: string, filePath: string) => {
-      const { workMomentID } = useMessageStore.getState().downloadMap[url];
+      const task = useMessageStore.getState().downloadMap[url];
+      if (!task) return;
+      const { workMomentID } = task;
 
       if (workMomentID?.split("-")[0] === moments.workMomentID) {
         setPreviewList((list) => {

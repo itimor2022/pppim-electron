@@ -16,7 +16,8 @@ const MediaMessageRender: FC<IMessageItemProps> = ({ message, showAlbum }) => {
   const dragRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   const { progress, downloadState } = useMessageFileDownloadState(message);
-  const uploadProgress = useMessageUploadProgress(message.clientMsgID);
+  const isSending = message.status === MessageStatus.Sending;
+  const uploadProgress = useMessageUploadProgress(message.clientMsgID, isSending);
 
   const isVideoMessage = message.contentType === MessageType.VideoMessage;
   const imageHeight = isVideoMessage
@@ -81,7 +82,6 @@ const MediaMessageRender: FC<IMessageItemProps> = ({ message, showAlbum }) => {
       : message.pictureElem.snapshotPicture.url;
   };
 
-  const isSending = message.status === MessageStatus.Sending;
   const minStyle = { minHeight: `${adaptedHight}px`, minWidth: `${adaptedWidth}px` };
 
   return (

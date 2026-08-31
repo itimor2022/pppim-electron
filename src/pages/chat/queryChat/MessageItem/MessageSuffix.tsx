@@ -71,7 +71,13 @@ const MessageSuffix: FC<IMessageItemProps> = ({ message, conversationID }) => {
   const reSend = async () => {
     updateOneMessage({ ...message, status: MessageStatus.Sending });
     await checkResendFile(message);
-    sendMessage({ message, needPush: false, isResend: true });
+    sendMessage({
+      message,
+      recvID: message.recvID,
+      groupID: message.groupID,
+      needPush: false,
+      isResend: true,
+    });
   };
 
   return (

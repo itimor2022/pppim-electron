@@ -5,7 +5,6 @@ import { MessageType } from "open-im-sdk-wasm";
 import { memo, useEffect, useRef, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 
-import file_download from "@/assets/images/messageItem/file_download.png";
 import file_icon from "@/assets/images/messageItem/file_icon.png";
 import {
   getSourceData,
@@ -13,10 +12,11 @@ import {
 } from "@/hooks/useMessageFileDownloadState";
 import { IMSDK } from "@/layout/MainContentWrap";
 import ViewFileInFinder from "@/pages/common/GlobalSearchModal/ViewFileInFinder";
-import { ExMessageItem, useMessageStore } from "@/store";
+import { ExMessageItem, useConversationStore, useMessageStore } from "@/store";
 import FileDownloadIcon from "@/svg/FileDownloadIcon";
 import { bytesToSize, feedbackToast } from "@/utils/common";
 import { formatMessageTime } from "@/utils/imCommon";
+import { scheduleIMSDKRequest } from "@/utils/imSdkRequestScheduler";
 
 import MessageSearchBar from "./MessageSearchBar";
 
@@ -38,6 +38,11 @@ const FileMessagePane = ({
 }) => {
   const loadMoreKeyword = useRef("");
   const inputRef = useRef<{ clear: () => void }>(null);
+  const searchGeneration = useRef(0);
+  const isActiveRef = useRef(isActive);
+  const isOverlayOpenRef = useRef(isOverlayOpen);
+  isActiveRef.current = isActive;
+  isOverlayOpenRef.current = isOverlayOpen;
   const [loadState, setLoadState] = useState({
     ...initialData,
   });
@@ -45,11 +50,14 @@ const FileMessagePane = ({
 
   useEffect(() => {
     const downloadSuccessHandler = (url: string, filePath: string) => {
-      const { clientMsgID } = useMessageStore.getState().downloadMap[url];
+      const task = useMessageStore.getState().downloadMap[url];
+      if (!task) return;
+      const { clientMsgID } = task;
 
-      const index = latestLoadState.current.messageList.findIndex(
-        (message) => message.clientMsgID === clientMsgID,
-      );
+      const index =
+        latestLoadState.current?.messageList.findIndex(
+          (message) => message.clientMsgID === clientMsgID,
+        ) ?? -1;
       if (index > -1) {
         setLoadState((state) => {
           const tmpMessage = [...state.messageList];
@@ -73,13 +81,17 @@ const FileMessagePane = ({
   }, []);
 
   useEffect(() => {
-    return () => {
-      if (!isOverlayOpen) {
-        setLoadState({ ...initialData });
-        inputRef.current?.clear();
-      }
-    };
-  }, [conversationID, isOverlayOpen]);
+    searchGeneration.current += 1;
+    setLoadState({ ...initialData });
+    inputRef.current?.clear();
+  }, [conversationID]);
+
+  useEffect(() => {
+    if (isOverlayOpen) return;
+    searchGeneration.current += 1;
+    setLoadState({ ...initialData });
+    inputRef.current?.clear();
+  }, [isOverlayOpen]);
 
   useEffect(() => {
     if (isActive) {
@@ -87,41 +99,68 @@ const FileMessagePane = ({
     }
   }, [isActive]);
 
-  const triggerSearch = (keyword: string, loadMore = false) => {
-    if ((!loadState.hasMore && loadMore) || loadState.loading || !conversationID)
+  const triggerSearch = async (keyword: string, loadMore = false) => {
+    if (
+      (!loadState.hasMore && loadMore) ||
+      (loadState.loading && loadMore) ||
+      !conversationID ||
+      !isActive ||
+      !isOverlayOpen
+    )
       return;
-    setLoadState((state) => ({ ...state, loading: true }));
-
-    IMSDK.searchLocalMessages({
-      conversationID,
-      keywordList: [keyword],
-      keywordListMatchType: 0,
-      senderUserIDList: [],
-      messageTypeList: [MessageType.FileMessage],
-      searchTimePosition: 0,
-      searchTimePeriod: 0,
-      pageIndex: !loadMore ? 1 : loadState.pageIndex,
-      count: 20,
-    })
-      .then(({ data }) => {
-        const searchData: ExMessageItem[] = data.searchResultItems
-          ? data.searchResultItems[0].messageList
-          : [];
-        setLoadState((state) => ({
-          loading: false,
-          pageIndex: state.pageIndex + 1,
-          hasMore: searchData.length === 20,
-          messageList: [...(!loadMore ? [] : state.messageList), ...searchData],
-        }));
-      })
-      .catch((error) => {
-        setLoadState((state) => ({
-          ...state,
-          loading: false,
-        }));
-        feedbackToast({ error, msg: t("toast.getMessageListFailed") });
-      });
+    const generation = loadMore ? searchGeneration.current : ++searchGeneration.current;
+    const requestPageIndex = loadMore ? loadState.pageIndex : 1;
     loadMoreKeyword.current = keyword;
+    setLoadState((state) =>
+      loadMore ? { ...state, loading: true } : { ...initialData, loading: true },
+    );
+
+    try {
+      const response = await scheduleIMSDKRequest(
+        () =>
+          IMSDK.searchLocalMessages({
+            conversationID,
+            keywordList: [keyword],
+            keywordListMatchType: 0,
+            senderUserIDList: [],
+            messageTypeList: [MessageType.FileMessage],
+            searchTimePosition: 0,
+            searchTimePeriod: 0,
+            pageIndex: requestPageIndex,
+            count: 20,
+          }),
+        {
+          priority: "low",
+          isValid: () =>
+            generation === searchGeneration.current &&
+            isActiveRef.current &&
+            isOverlayOpenRef.current &&
+            useConversationStore.getState().currentConversation?.conversationID ===
+              conversationID,
+        },
+      );
+      if (
+        !response ||
+        generation !== searchGeneration.current ||
+        !isActiveRef.current ||
+        !isOverlayOpenRef.current ||
+        useConversationStore.getState().currentConversation?.conversationID !==
+          conversationID
+      )
+        return;
+      const searchData: ExMessageItem[] =
+        response.data.searchResultItems?.[0]?.messageList ?? [];
+      setLoadState((state) => ({
+        loading: false,
+        pageIndex: requestPageIndex + 1,
+        hasMore: searchData.length === 20,
+        messageList: [...(!loadMore ? [] : state.messageList), ...searchData],
+      }));
+    } catch (error) {
+      if (generation !== searchGeneration.current) return;
+      setLoadState((state) => ({ ...state, loading: false }));
+      feedbackToast({ error, msg: t("toast.getMessageListFailed") });
+    }
   };
 
   return (

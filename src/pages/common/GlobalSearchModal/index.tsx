@@ -8,7 +8,6 @@ import {
   FriendUserItem,
   GroupItem,
   MessageItem,
-  SearchMessageResult,
   SearchMessageResultItem,
 } from "open-im-sdk-wasm/lib/types/entity";
 import {
@@ -71,6 +70,7 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
   const latestHistoryFiles = useLatest(historyFiles);
   const searchBarRef = useRef<SearchBarHandle>(null);
   const chatLogRef = useRef<{ updateIdx: (idx: number) => void }>(null);
+  const searchGeneration = useRef(0);
 
   const { isOverlayOpen, closeOverlay } = useOverlayVisible(ref);
 
@@ -82,11 +82,14 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
 
   useEffect(() => {
     const downloadSuccessHandler = (url: string, filePath: string) => {
-      const { clientMsgID } = useMessageStore.getState().downloadMap[url];
+      const task = useMessageStore.getState().downloadMap[url];
+      if (!task) return;
+      const { clientMsgID } = task;
 
-      const index = latestHistoryFiles.current.data.findIndex(
-        (message) => message.clientMsgID === clientMsgID,
-      );
+      const index =
+        latestHistoryFiles.current?.data.findIndex(
+          (message) => message.clientMsgID === clientMsgID,
+        ) ?? -1;
       if (index > -1) {
         setHistoryFiles((state) => {
           const tmpMessage = [...state.data];
@@ -109,23 +112,25 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
     };
   }, []);
 
-  useKeyPress("leftarrow", () => {
-    const currentIndex = TabKeys.indexOf(activeKey);
-    if (currentIndex > 0 && isOverlayOpen) {
-      setActiveKey(TabKeys[currentIndex - 1]);
-    }
-  });
-
-  useKeyPress("rightarrow", () => {
-    const currentIndex = TabKeys.indexOf(activeKey);
-    if (currentIndex < TabKeys.length - 1 && isOverlayOpen) {
-      setActiveKey(TabKeys[currentIndex + 1]);
-    }
-  });
-
   const toggleTab = useCallback((tab: TabKey) => {
     setActiveKey(tab);
   }, []);
+
+  useKeyPress("leftarrow", (event) => {
+    if ((event.target as HTMLElement | null)?.matches("input, textarea")) return;
+    const currentIndex = TabKeys.indexOf(activeKey);
+    if (currentIndex > 0 && isOverlayOpen) {
+      toggleTab(TabKeys[currentIndex - 1]);
+    }
+  });
+
+  useKeyPress("rightarrow", (event) => {
+    if ((event.target as HTMLElement | null)?.matches("input, textarea")) return;
+    const currentIndex = TabKeys.indexOf(activeKey);
+    if (currentIndex < TabKeys.length - 1 && isOverlayOpen) {
+      toggleTab(TabKeys[currentIndex + 1]);
+    }
+  });
 
   const toggleChatLogActive = useCallback(
     (idx: number) => chatLogRef.current?.updateIdx(idx),
@@ -190,7 +195,8 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
     },
   ];
 
-  const searchFriend = async (keyword: string) => {
+  const searchFriend = async (keyword: string, generation: number) => {
+    if (generation !== searchGeneration.current) return;
     setFriends({
       data: [],
       loading: true,
@@ -207,13 +213,15 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
     } catch (error) {
       console.error(error);
     }
+    if (generation !== searchGeneration.current) return;
     setFriends({
       data: friendlist,
       loading: false,
     });
   };
 
-  const searchGroup = async (keyword: string) => {
+  const searchGroup = async (keyword: string, generation: number) => {
+    if (generation !== searchGeneration.current) return;
     setGroups({
       data: [],
       loading: true,
@@ -230,13 +238,15 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
       console.error(error);
     }
 
+    if (generation !== searchGeneration.current) return;
     setGroups({
       data: groupList,
       loading: false,
     });
   };
 
-  const searchChatLogs = async (keyword: string) => {
+  const searchChatLogs = async (keyword: string, generation: number) => {
+    if (generation !== searchGeneration.current) return;
     setChatLogs({
       data: [],
       loading: true,
@@ -274,13 +284,15 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
     } catch (error) {
       console.error(error);
     }
+    if (generation !== searchGeneration.current) return;
     setChatLogs({
       data: chatLogList,
       loading: false,
     });
   };
 
-  const searchHistoryFiles = async (keyword: string) => {
+  const searchHistoryFiles = async (keyword: string, generation: number) => {
+    if (generation !== searchGeneration.current) return;
     setHistoryFiles({
       data: [],
       loading: true,
@@ -305,6 +317,7 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
     } catch (error) {
       console.error(error);
     }
+    if (generation !== searchGeneration.current) return;
     setHistoryFiles({
       data: historyFileList,
       loading: false,
@@ -312,6 +325,7 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
   };
 
   const resetState = () => {
+    searchGeneration.current += 1;
     setFriends({
       data: [],
       loading: false,
@@ -333,11 +347,19 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
   };
 
   const triggerSearch = (keyword: string) => {
-    if (!keyword) return;
-    searchFriend(keyword);
-    searchGroup(keyword);
-    searchChatLogs(keyword);
-    searchHistoryFiles(keyword);
+    const normalizedKeyword = keyword.trim();
+    const generation = ++searchGeneration.current;
+    if (!normalizedKeyword) {
+      setFriends({ data: [], loading: false });
+      setGroups({ data: [], loading: false });
+      setChatLogs({ data: [], loading: false });
+      setHistoryFiles({ data: [], loading: false });
+      return;
+    }
+    void searchFriend(normalizedKeyword, generation);
+    void searchGroup(normalizedKeyword, generation);
+    void searchChatLogs(normalizedKeyword, generation);
+    void searchHistoryFiles(normalizedKeyword, generation);
   };
 
   return (
@@ -357,6 +379,9 @@ const GlobalSearchModal: ForwardRefRenderFunction<OverlayVisibleHandle, unknown>
         }
       }}
       styles={{
+        content: {
+          height: "80vh",
+        },
         mask: {
           opacity: 0,
           transition: "none",
@@ -388,7 +413,9 @@ const SearchBar: ForwardRefRenderFunction<
   const inputRef = useRef<InputRef>(null);
   const [keyword, setKeyword] = useState("");
 
-  const { run: debounceSearch, cancel } = useDebounceFn(triggerSearch, { wait: 500 });
+  const { run: debounceSearch, cancel } = useDebounceFn(triggerSearch, {
+    wait: 500,
+  });
 
   const onChange = (value: string) => {
     setKeyword(value);

@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { IMSDK } from "@/layout/MainContentWrap";
 import { useConversationStore } from "@/store";
 import { feedbackToast } from "@/utils/common";
+import { scheduleIMSDKRequest } from "@/utils/imSdkRequestScheduler";
 
 export function useConversationToggle() {
   const navigate = useNavigate();
@@ -28,10 +29,14 @@ export function useConversationToggle() {
     if (!conversation) {
       try {
         conversation = (
-          await IMSDK.getOneConversation({
-            sourceID,
-            sessionType,
-          })
+          await scheduleIMSDKRequest(
+            () =>
+              IMSDK.getOneConversation({
+                sourceID,
+                sessionType,
+              }),
+            { priority: "high", lane: "interactive" },
+          )
         ).data;
       } catch (error) {
         feedbackToast({ error });

@@ -47,13 +47,17 @@ export function useFileMessage() {
     const videoPath =
       (await window.electronAPI?.saveFileToDisk({
         file,
+        sync: true,
         type: "sentFileCache",
       })) || `/${file.name}`;
+    const videoObjectUrl = URL.createObjectURL(file);
+    const duration = await getMediaDuration(videoObjectUrl);
+    URL.revokeObjectURL(videoObjectUrl);
     const options = {
       videoFile: file,
       snapshotFile: snapShotFile,
       videoPath,
-      duration: await getMediaDuration(URL.createObjectURL(file)),
+      duration,
       videoType: file.type,
       snapshotPath,
       videoUUID: uuidV4(),
@@ -90,7 +94,8 @@ export function useFileMessage() {
 
   const createFileMessage = async (file: FileWithPath): Promise<ExMessageItem> => {
     const isImage = file.type.includes("image");
-    const isVideo = file.type.includes(window.electronAPI ? "video" : "mp4");
+    const isVideo =
+      file.type.includes("video") || /\.(mp4|mov|m4v|webm)$/i.test(file.name);
     if (isImage) {
       return await getImageMessage(file);
     }
@@ -118,30 +123,194 @@ export function useFileMessage() {
 
   const getVideoSnshotFile = (file: File): Promise<File> => {
     const url = URL.createObjectURL(file);
-    return new Promise((reslove, reject) => {
-      const video = document.createElement("VIDEO") as HTMLVideoElement;
-      video.setAttribute("autoplay", "autoplay");
-      video.setAttribute("muted", "muted");
-      video.innerHTML = `<source src="${url}" type="audio/mp4">`;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let lastSnapshotFile: File | null = null;
+      const video = document.createElement("video");
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
-      video.addEventListener("canplay", () => {
-        const anw = document.createAttribute("width");
-        //@ts-ignore
-        anw.nodeValue = video.videoWidth;
-        const anh = document.createAttribute("height");
-        //@ts-ignore
-        anh.nodeValue = video.videoHeight;
-        canvas.setAttributeNode(anw);
-        canvas.setAttributeNode(anh);
-        //@ts-ignore
+
+      const cleanup = () => {
+        window.clearTimeout(timer);
+        URL.revokeObjectURL(url);
+        video.removeAttribute("src");
+        video.load();
+      };
+      const fail = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error("Failed to capture video snapshot"));
+      };
+      const isDarkFrame = () => {
+        if (!ctx || !canvas.width || !canvas.height) return true;
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        const step = Math.max(4, Math.floor(imageData.length / 4000 / 4) * 4);
+        let sampled = 0;
+        let visible = 0;
+
+        for (let i = 0; i < imageData.length; i += step) {
+          const alpha = imageData[i + 3];
+          if (alpha < 10) continue;
+          sampled += 1;
+          const brightness = imageData[i] + imageData[i + 1] + imageData[i + 2];
+          if (brightness > 72) {
+            visible += 1;
+          }
+        }
+
+        return sampled === 0 || visible / sampled < 0.01;
+      };
+      const capture = () => {
+        if (!video.videoWidth || !video.videoHeight || !ctx) {
+          fail();
+          return null;
+        }
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
-        const base64 = canvas.toDataURL("image/png");
-        //@ts-ignore
+        const snapshotFile = base64toFile(canvas.toDataURL("image/png"));
+        lastSnapshotFile = snapshotFile;
+        return {
+          file: snapshotFile,
+          isDark: isDarkFrame(),
+        };
+      };
+      const finish = (snapshotFile: File) => {
+        if (settled) return;
+        settled = true;
         video.pause();
-        const file = base64toFile(base64);
-        reslove(file);
+        cleanup();
+        resolve(snapshotFile);
+      };
+      const seekTo = (time: number) =>
+        new Promise<void>((resolveSeek, rejectSeek) => {
+          const clear = () => {
+            window.clearTimeout(seekTimer);
+            video.removeEventListener("seeked", onSeeked);
+            video.removeEventListener("error", onError);
+          };
+          const onSeeked = () => {
+            clear();
+            resolveSeek();
+          };
+          const onError = () => {
+            clear();
+            rejectSeek(new Error("Failed to seek video"));
+          };
+          const seekTimer = window.setTimeout(() => {
+            clear();
+            rejectSeek(new Error("Video seek timeout"));
+          }, 2000);
+
+          video.addEventListener("seeked", onSeeked);
+          video.addEventListener("error", onError);
+          try {
+            video.currentTime = time;
+          } catch (error) {
+            clear();
+            rejectSeek(error);
+          }
+        });
+      const waitForFrameData = () =>
+        new Promise<void>((resolveFrame, rejectFrame) => {
+          if (video.readyState >= 2) {
+            resolveFrame();
+            return;
+          }
+          const clear = () => {
+            window.clearTimeout(frameTimer);
+            video.removeEventListener("loadeddata", onLoadedData);
+            video.removeEventListener("error", onError);
+          };
+          const onLoadedData = () => {
+            clear();
+            resolveFrame();
+          };
+          const onError = () => {
+            clear();
+            rejectFrame(new Error("Failed to load video frame"));
+          };
+          const frameTimer = window.setTimeout(() => {
+            clear();
+            rejectFrame(new Error("Video frame load timeout"));
+          }, 2000);
+
+          video.addEventListener("loadeddata", onLoadedData);
+          video.addEventListener("error", onError);
+        });
+      const getCandidateTimes = () => {
+        const duration = Number.isFinite(video.duration) ? video.duration : 0;
+        if (!duration) return [];
+        const maxTime = Math.max(duration - 0.1, 0);
+        return Array.from(
+          new Set(
+            [0.1, duration * 0.1, duration * 0.25, duration * 0.5, duration * 0.75]
+              .map((time) => Math.min(Math.max(time, 0.1), maxTime))
+              .filter((time) => time > 0 && time <= maxTime),
+          ),
+        );
+      };
+      const captureCandidateFrames = async () => {
+        const candidateTimes = getCandidateTimes();
+        if (!candidateTimes.length) {
+          try {
+            await waitForFrameData();
+          } catch {
+            fail();
+            return;
+          }
+          const snapshot = capture();
+          if (snapshot) {
+            finish(snapshot.file);
+          }
+          return;
+        }
+
+        for (const time of candidateTimes) {
+          if (settled) return;
+          try {
+            await seekTo(time);
+          } catch {
+            continue;
+          }
+          const snapshot = capture();
+          if (!snapshot) return;
+          if (!snapshot.isDark) {
+            finish(snapshot.file);
+            return;
+          }
+        }
+
+        if (lastSnapshotFile) {
+          finish(lastSnapshotFile);
+          return;
+        }
+        try {
+          await waitForFrameData();
+        } catch {
+          fail();
+          return;
+        }
+        const snapshot = capture();
+        if (snapshot) {
+          finish(snapshot.file);
+          return;
+        }
+        fail();
+      };
+      const timer = window.setTimeout(fail, 8000);
+
+      video.muted = true;
+      video.preload = "auto";
+      video.playsInline = true;
+      video.crossOrigin = "anonymous";
+      video.addEventListener("loadedmetadata", () => {
+        void captureCandidateFrames();
       });
+      video.addEventListener("error", fail);
+      video.src = url;
+      video.load();
     });
   };
 
@@ -150,6 +319,9 @@ export function useFileMessage() {
       const vel = new Audio(path);
       vel.onloadedmetadata = function () {
         resolve(Number(vel.duration.toFixed()));
+      };
+      vel.onerror = function () {
+        resolve(0);
       };
     });
 

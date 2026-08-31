@@ -93,14 +93,15 @@ const DashboardPanel = ({
     setTimeout(() => toggleChatLogActive(idx));
   }, []);
 
-  const loading =
-    friends.loading || groups.loading || chatLogs.loading || historyFiles.loading;
   const isEmpty = !(
     friends.data.length +
     groups.data.length +
     chatLogs.data.length +
     historyFiles.data.length
   );
+  const loading =
+    isEmpty &&
+    (friends.loading || groups.loading || chatLogs.loading || historyFiles.loading);
   const initailGroupIdx = friends.data.slice(0, 3).length;
   const initailChatLogsIdx = initailGroupIdx + groups.data.slice(0, 3).length;
   const initailHistoryFilesIdx = initailChatLogsIdx + chatLogs.data.slice(0, 3).length;

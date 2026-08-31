@@ -23,6 +23,9 @@ export const NewFriends = () => {
   const sendFriendApplicationList = useContactStore(
     (state) => state.sendFriendApplicationList,
   );
+  const updateRecvFriendApplication = useContactStore(
+    (state) => state.updateRecvFriendApplication,
+  );
 
   const friendApplicationList = sortArray(
     recvFriendApplicationList.concat(sendFriendApplicationList),
@@ -38,27 +41,41 @@ export const NewFriends = () => {
     setAccessedFriendApplication(accessedFriendApplications).then(calcApplicationBadge);
   }, [recvFriendApplicationList]);
 
-  const onAccept = useCallback(async (application: FriendApplicationItem) => {
-    try {
-      await IMSDK.acceptFriendApplication({
-        toUserID: application.fromUserID,
-        handleMsg: "",
-      });
-    } catch (error) {
-      feedbackToast({ error });
-    }
-  }, []);
+  const onAccept = useCallback(
+    async (application: FriendApplicationItem) => {
+      try {
+        await IMSDK.acceptFriendApplication({
+          toUserID: application.fromUserID,
+          handleMsg: "",
+        });
+        await updateRecvFriendApplication({
+          ...application,
+          handleResult: ApplicationHandleResult.Agree,
+        });
+      } catch (error) {
+        feedbackToast({ error });
+      }
+    },
+    [updateRecvFriendApplication],
+  );
 
-  const onReject = useCallback(async (application: FriendApplicationItem) => {
-    try {
-      await IMSDK.refuseFriendApplication({
-        toUserID: application.fromUserID,
-        handleMsg: "",
-      });
-    } catch (error) {
-      feedbackToast({ error });
-    }
-  }, []);
+  const onReject = useCallback(
+    async (application: FriendApplicationItem) => {
+      try {
+        await IMSDK.refuseFriendApplication({
+          toUserID: application.fromUserID,
+          handleMsg: "",
+        });
+        await updateRecvFriendApplication({
+          ...application,
+          handleResult: ApplicationHandleResult.Reject,
+        });
+      } catch (error) {
+        feedbackToast({ error });
+      }
+    },
+    [updateRecvFriendApplication],
+  );
 
   return (
     <div className="flex h-full w-full flex-col bg-white">

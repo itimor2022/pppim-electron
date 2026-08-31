@@ -2,6 +2,7 @@ import { useLatest, useThrottleFn } from "ahooks";
 import { t } from "i18next";
 import { CbEvents } from "open-im-sdk-wasm";
 import {
+  GroupStatus,
   LogLevel,
   MessageReceiveOptType,
   MessageType,
@@ -20,7 +21,7 @@ import {
   WSEvent,
   WsResponse,
 } from "open-im-sdk-wasm/lib/types/entity";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { message as antdMessage } from "@/AntdGlobalComp";
@@ -35,12 +36,53 @@ import {
   useUserStore,
 } from "@/store";
 import { useContactStore } from "@/store/contact";
-import { feedbackToast } from "@/utils/common";
+import { feedbackToast, finishAutoDownload } from "@/utils/common";
 import emitter from "@/utils/events";
 import { createNotification, initStore, isGroupSession } from "@/utils/imCommon";
 import { clearIMProfile, getIMToken, getIMUserID } from "@/utils/storage";
 
 import { IMSDK } from "./MainContentWrap";
+
+const CONVERSATION_EVENT_BATCH_MS = 250;
+const SYNC_CONVERSATION_EVENT_BATCH_MS = 1_000;
+const CONVERSATION_EVENT_CHUNK_SIZE = 200;
+const CONVERSATION_EVENT_CHUNK_BUDGET_MS = 6;
+const CONVERSATION_FLUSH_IDLE_TIMEOUT_MS = 500;
+const SYNC_CURRENT_MESSAGE_BATCH_MS = 500;
+
+type PendingConversationEventBatch = {
+  data: ConversationItem[];
+  index: number;
+};
+
+const preserveNewerConversationLatest = (
+  current: ConversationItem,
+  incoming: ConversationItem,
+) => {
+  let preserveCurrentLatest = current.latestMsgSendTime > incoming.latestMsgSendTime;
+  if (current.latestMsgSendTime === incoming.latestMsgSendTime) {
+    try {
+      const currentMessage = JSON.parse(current.latestMsg) as ExMessageItem;
+      const incomingMessage = JSON.parse(incoming.latestMsg) as ExMessageItem;
+      preserveCurrentLatest =
+        currentMessage.clientMsgID !== incomingMessage.clientMsgID &&
+        currentMessage.seq > 0 &&
+        incomingMessage.seq > 0 &&
+        currentMessage.seq > incomingMessage.seq;
+    } catch {
+      preserveCurrentLatest = false;
+    }
+  }
+  if (!preserveCurrentLatest) return incoming;
+  return {
+    ...incoming,
+    latestMsg: current.latestMsg,
+    latestMsgSendTime: current.latestMsgSendTime,
+  };
+};
+
+const normalizeNewMessages = (data: ExMessageItem | ExMessageItem[]): ExMessageItem[] =>
+  Array.isArray(data) ? data : data ? [data] : [];
 
 export function useGlobalEvent() {
   const navigate = useNavigate();
@@ -50,6 +92,22 @@ export function useGlobalEvent() {
     isConnecting: false,
   });
   const latestConnectState = useLatest(connectState);
+  const initialSyncFinished = useRef(false);
+  const initialSyncIndicatorDismissed = useRef(false);
+  const syncRetryCount = useRef(0);
+  const syncRetryTimer = useRef<ReturnType<typeof setTimeout>>();
+  const syncFallbackTimer = useRef<ReturnType<typeof setTimeout>>();
+  const backgroundSyncing = useRef(false);
+  const pendingConversationChanges = useRef(new Map<string, ConversationItem>());
+  const conversationChangeFlushTimer = useRef<ReturnType<typeof setTimeout>>();
+  const conversationChangeIdleCallback = useRef<number>();
+  const pendingConversationEventBatches = useRef<PendingConversationEventBatch[]>([]);
+  const conversationEventProcessTimer = useRef<ReturnType<typeof setTimeout>>();
+  const pendingConversationTerminalHandler = useRef<() => void>();
+  const pendingSyncCurrentMessages = useRef(new Map<string, ExMessageItem>());
+  const syncCurrentMessageFlushTimer = useRef<ReturnType<typeof setTimeout>>();
+  const pendingAddedFriends = useRef(new Map<string, FriendUserItem>());
+  const friendAddedFlushTimer = useRef<ReturnType<typeof setTimeout>>();
   // user
   const updateSelfInfo = useUserStore((state) => state.updateSelfInfo);
   const getWorkMomentsUnreadCount = useUserStore(
@@ -79,7 +137,7 @@ export function useGlobalEvent() {
   );
   // message
   const pushNewMessage = useMessageStore((state) => state.pushNewMessage);
-  const tryAddPreviewImg = useMessageStore((state) => state.tryAddPreviewImg);
+  const pushNewMessages = useMessageStore((state) => state.pushNewMessages);
   const updateOneMessage = useMessageStore((state) => state.updateOneMessage);
   const updateMessageNicknameAndFaceUrl = useMessageStore(
     (state) => state.updateMessageNicknameAndFaceUrl,
@@ -88,7 +146,7 @@ export function useGlobalEvent() {
   const removeDownloadTask = useMessageStore((state) => state.removeDownloadTask);
   // contact
   const updateFriend = useContactStore((state) => state.updateFriend);
-  const pushNewFriend = useContactStore((state) => state.pushNewFriend);
+  const setFriendList = useContactStore((state) => state.setFriendList);
   const updateBlack = useContactStore((state) => state.updateBlack);
   const pushNewBlack = useContactStore((state) => state.pushNewBlack);
   const updateGroup = useContactStore((state) => state.updateGroup);
@@ -110,12 +168,56 @@ export function useGlobalEvent() {
   let audioEl: HTMLAudioElement | null = null;
 
   useEffect(() => {
+    const pendingFriends = pendingAddedFriends.current;
+    const pendingConversations = pendingConversationChanges.current;
+    const pendingSyncMessages = pendingSyncCurrentMessages.current;
     loginCheck();
     cacheConversationList = [];
     setIMListener();
     return () => {
+      if (syncRetryTimer.current) {
+        clearTimeout(syncRetryTimer.current);
+      }
+      if (syncFallbackTimer.current) {
+        clearTimeout(syncFallbackTimer.current);
+      }
+      if (conversationChangeFlushTimer.current) {
+        clearTimeout(conversationChangeFlushTimer.current);
+      }
+      if (conversationChangeIdleCallback.current !== undefined) {
+        window.cancelIdleCallback(conversationChangeIdleCallback.current);
+      }
+      if (conversationEventProcessTimer.current) {
+        clearTimeout(conversationEventProcessTimer.current);
+      }
+      pendingConversationEventBatches.current = [];
+      pendingConversationTerminalHandler.current = undefined;
+      pendingConversations.clear();
+      if (syncCurrentMessageFlushTimer.current) {
+        clearTimeout(syncCurrentMessageFlushTimer.current);
+      }
+      pendingSyncMessages.clear();
+      if (friendAddedFlushTimer.current) {
+        clearTimeout(friendAddedFlushTimer.current);
+      }
+      pendingFriends.clear();
       disposeIMListener();
     };
+  }, []);
+
+  useEffect(() => {
+    const notifyNetworkRecovered = () => {
+      if (syncRetryTimer.current) {
+        clearTimeout(syncRetryTimer.current);
+        syncRetryTimer.current = undefined;
+      }
+      syncRetryCount.current = 0;
+      void IMSDK.networkStatusChanged().catch((error) => {
+        console.error("notify sdk network recovered failed", error);
+      });
+    };
+    window.addEventListener("online", notifyNetworkRecovered);
+    return () => window.removeEventListener("online", notifyNetworkRecovered);
   }, []);
 
   useEffect(() => {
@@ -130,8 +232,10 @@ export function useGlobalEvent() {
     };
 
     const downloadSuccessHandler = (url: string, savePath: string) => {
-      const { clientMsgID, conversationID, originUrl, isMediaMessage, isThumb } =
-        useMessageStore.getState().downloadMap[url];
+      const task = useMessageStore.getState().downloadMap[url];
+      finishAutoDownload(url);
+      if (!task) return;
+      const { clientMsgID, conversationID, originUrl, isMediaMessage, isThumb } = task;
       if (isThumb && originUrl) {
         addImageCache(originUrl, savePath);
       }
@@ -169,25 +273,28 @@ export function useGlobalEvent() {
   useEffect(() => {
     const downloadProgressHandler = (url: string, progress: number) => {
       const task = useMessageStore.getState().downloadMap[url];
-      if (!task) return;
+      if (!task || (task.isThumb && !task.workMomentID)) return;
       updateDownloadTask(url, {
         progress,
       });
     };
-    const downloadSuccessHandler = (url: string, filePath: string) => {
+    const downloadSuccessHandler = (url: string) => {
+      finishAutoDownload(url);
       const task = useMessageStore.getState().downloadMap[url];
-      if (!task) return;
+      if (!task || (task.isThumb && !task.workMomentID)) return;
       updateDownloadTask(url, {
         progress: 0,
         downloadState: "finish",
       });
     };
     const downloadCancelHandler = (url: string) => {
+      finishAutoDownload(url);
       const task = useMessageStore.getState().downloadMap[url];
       if (!task) return;
       removeDownloadTask(url);
     };
     const downloadFailedHandler = (url: string) => {
+      finishAutoDownload(url);
       const task = useMessageStore.getState().downloadMap[url];
       if (!task) return;
       removeDownloadTask(url);
@@ -221,7 +328,7 @@ export function useGlobalEvent() {
     const IMToken = (await getIMToken()) as string;
     const IMUserID = (await getIMUserID()) as string;
     if (!IMToken || !IMUserID) {
-      clearIMProfile();
+      await clearIMProfile();
       navigate("/login");
       return;
     }
@@ -239,20 +346,22 @@ export function useGlobalEvent() {
         platformID: window.electronAPI?.getPlatform() ?? 5,
         apiAddr: getApiUrl(),
         wsAddr: getWsUrl(),
-        // 大账号同步期间 SDK 会产生海量请求/数据日志, 生产环境关闭 Debug 打印,
-        // 避免浏览器 console 堆积几十万条消息导致卡顿。
-        logLevel: import.meta.env.PROD ? LogLevel.Warn : LogLevel.Debug,
+        logLevel: LogLevel.Error,
+        isLogStandardOutput: false,
       });
       window.electronAPI?.ipcInvoke("setUserCachePath", IMUserID);
       initStore();
     } catch (error) {
-      if ((error as WsResponse).errCode !== 10102) {
-        clearIMProfile();
+      if ((error as WsResponse).errCode === 10102) {
+        window.electronAPI?.ipcInvoke("setUserCachePath", IMUserID);
+        initStore();
+      } else {
+        await clearIMProfile();
         navigate("/login");
       }
+    } finally {
+      setConnectState((state) => ({ ...state, isLogining: false }));
     }
-
-    setConnectState((state) => ({ ...state, isLogining: false }));
   };
 
   const setIMListener = () => {
@@ -268,8 +377,8 @@ export function useGlobalEvent() {
     IMSDK.on(CbEvents.OnSyncServerFinish, syncFinishHandler);
     IMSDK.on(CbEvents.OnSyncServerFailed, syncFailedHandler);
     // message
-    IMSDK.on(CbEvents.OnRecvNewMessage, newMessageHandler);
-    IMSDK.on(CbEvents.OnRecvNewMessages, newMessageHandler);
+    IMSDK.on(CbEvents.OnRecvNewMessage, liveMessageHandler);
+    IMSDK.on(CbEvents.OnRecvNewMessages, bulkMessageHandler);
     IMSDK.on(CbEvents.OnNewRecvMessageRevoked, revokedMessageHandler);
     // conversation
     IMSDK.on(CbEvents.OnConversationChanged, conversationChnageHandler);
@@ -331,36 +440,262 @@ export function useGlobalEvent() {
     });
 
   // sync
-  const syncStartHandler = () => {
-    setConnectState((state) => ({ ...state, isSyncing: true }));
+  const flushPendingSyncCurrentMessages = () => {
+    if (syncCurrentMessageFlushTimer.current) {
+      clearTimeout(syncCurrentMessageFlushTimer.current);
+      syncCurrentMessageFlushTimer.current = undefined;
+    }
+    if (!pendingSyncCurrentMessages.current.size) return;
+    const messages = Array.from(pendingSyncCurrentMessages.current.values());
+    pendingSyncCurrentMessages.current.clear();
+    handleCurrentMessagesBatch(messages);
   };
-  const syncFinishHandler = () => {
-    window.electronAPI?.ipcInvoke(
-      "updateUnreadCount",
-      useConversationStore.getState().unReadCount,
-    );
+
+  const syncStartHandler = () => {
+    const isInitialSync = !initialSyncFinished.current;
+    const shouldShowSyncIndicator =
+      isInitialSync && !initialSyncIndicatorDismissed.current;
+    backgroundSyncing.current = true;
+    useConversationStore.getState().updateSyncing(shouldShowSyncIndicator);
+    if (syncRetryTimer.current) {
+      clearTimeout(syncRetryTimer.current);
+      syncRetryTimer.current = undefined;
+    }
+    setConnectState((state) => ({ ...state, isSyncing: true }));
+    if (!syncFallbackTimer.current) {
+      syncFallbackTimer.current = setTimeout(() => {
+        initialSyncIndicatorDismissed.current = true;
+        syncFallbackTimer.current = undefined;
+        useConversationStore.getState().updateSyncing(false);
+        flushPendingConversationChanges();
+        const conversationList = useConversationStore.getState().conversationList;
+        updateConversationList(conversationList, "filter");
+      }, 15000);
+    }
+  };
+
+  const finalizeSyncFinish = () => {
+    backgroundSyncing.current = false;
+    initialSyncIndicatorDismissed.current = true;
+    useConversationStore.getState().updateSyncing(false);
+    flushPendingConversationChanges();
+    const conversationList = useConversationStore.getState().conversationList;
+    updateConversationList(conversationList, "filter");
+    if (syncRetryTimer.current) {
+      clearTimeout(syncRetryTimer.current);
+      syncRetryTimer.current = undefined;
+    }
+    if (syncFallbackTimer.current) {
+      clearTimeout(syncFallbackTimer.current);
+      syncFallbackTimer.current = undefined;
+    }
+    syncRetryCount.current = 0;
+    initialSyncFinished.current = true;
     // 登录同步完成: 服务端窗口内的会话此时已写入本地库。
     // login 后立即执行的 initStore 在同步完成前本地库为空(大账号同步耗时较长),
     // 此处必须重新拉取一次会话列表, 否则首次登录会出现"会话列表空白"。
-    useConversationStore.getState().getConversationListByReq();
+    const conversationStore = useConversationStore.getState();
+    conversationStore.getConversationListByReq();
+    void conversationStore.getUnReadCountByReq().then((unreadCount) => {
+      window.electronAPI?.ipcInvoke("updateUnreadCount", unreadCount);
+    });
     setConnectState((state) => ({ ...state, isSyncing: false }));
+    flushPendingSyncCurrentMessages();
+    emitter.emit("REFRESH_CHAT_LIST");
   };
-  const syncFailedHandler = () => {
-    feedbackToast({ msg: t("toast.syncFailed"), error: t("toast.syncFailed") });
+
+  const syncFinishHandler = () => {
+    if (pendingConversationEventBatches.current.length) {
+      pendingConversationTerminalHandler.current = finalizeSyncFinish;
+      scheduleConversationEventProcessing();
+      return;
+    }
+    finalizeSyncFinish();
+  };
+
+  const finalizeSyncFailed = (event: WSEvent) => {
+    backgroundSyncing.current = false;
+    initialSyncIndicatorDismissed.current = true;
+    useConversationStore.getState().updateSyncing(false);
+    flushPendingConversationChanges();
+    const conversationList = useConversationStore.getState().conversationList;
+    updateConversationList(conversationList, "filter");
+    if (syncFallbackTimer.current) {
+      clearTimeout(syncFallbackTimer.current);
+      syncFallbackTimer.current = undefined;
+    }
+    console.error("sync failed", {
+      errCode: event?.errCode,
+      errMsg: event?.errMsg,
+      failedAttempt: syncRetryCount.current + 1,
+      online: navigator.onLine,
+    });
+    if (syncRetryCount.current === 0) {
+      feedbackToast({ msg: t("toast.syncFailed"), error: t("toast.syncFailed") });
+    }
     // 同步失败也要尝试刷新一次: 部分数据(如已入库的窗口内会话)仍可展示
     useConversationStore.getState().getConversationListByReq();
     setConnectState((state) => ({ ...state, isSyncing: false }));
+    flushPendingSyncCurrentMessages();
+    if (syncRetryCount.current >= 3 || syncRetryTimer.current) return;
+
+    syncRetryCount.current += 1;
+    syncRetryTimer.current = setTimeout(() => {
+      syncRetryTimer.current = undefined;
+      void IMSDK.networkStatusChanged().catch((error) => {
+        console.error("retry sdk sync failed", error);
+      });
+    }, syncRetryCount.current * 5000);
+  };
+
+  const syncFailedHandler = (event: WSEvent) => {
+    if (pendingConversationEventBatches.current.length) {
+      pendingConversationTerminalHandler.current = () => finalizeSyncFailed(event);
+      scheduleConversationEventProcessing();
+      return;
+    }
+    finalizeSyncFailed(event);
   };
 
   // message
-  const newMessageHandler = ({ data }: WSEvent<ExMessageItem[]>) => {
-    if (latestConnectState.current.isSyncing) {
-      if (data.some((message) => inCurrentConversation(message))) {
-        emitter.emit("REFRESH_CHAT_LIST");
+  const syncCurrentGroupMuteStatus = (message: ExMessageItem) => {
+    if (
+      message.contentType !== MessageType.GroupMuted &&
+      message.contentType !== MessageType.GroupCancelMuted
+    ) {
+      return;
+    }
+
+    const conversationStore = useConversationStore.getState();
+    const currentGroupInfo = conversationStore.currentGroupInfo;
+    if (!currentGroupInfo || currentGroupInfo.groupID !== message.groupID) return;
+
+    const status =
+      message.contentType === MessageType.GroupMuted
+        ? GroupStatus.Muted
+        : GroupStatus.Nomal;
+    if (currentGroupInfo.status === status) return;
+
+    conversationStore.updateCurrentGroupInfo({ ...currentGroupInfo, status });
+  };
+
+  const syncLiveConversationLatest = (messages: ExMessageItem[], urgent = false) => {
+    if (!messages.length) return;
+
+    const conversationStore = useConversationStore.getState();
+    const selfUserID = useUserStore.getState().selfInfo.userID;
+    const groupConversationMap = new Map<string, ConversationItem>();
+    const userConversationMap = new Map<string, ConversationItem>();
+    conversationStore.conversationList.forEach((conversation) => {
+      if (conversation.groupID) {
+        groupConversationMap.set(conversation.groupID, conversation);
+      }
+      if (conversation.userID) {
+        userConversationMap.set(conversation.userID, conversation);
+      }
+    });
+    const changes = new Map<string, ConversationItem>();
+
+    messages.forEach((message) => {
+      if (
+        message.contentType === MessageType.TypingMessage ||
+        message.contentType === MessageType.RevokeMessage
+      ) {
+        return;
+      }
+
+      const sourceID = isGroupSession(message.sessionType)
+        ? message.groupID
+        : message.sendID === selfUserID
+        ? message.recvID
+        : message.sendID;
+      const conversation = isGroupSession(message.sessionType)
+        ? groupConversationMap.get(sourceID)
+        : userConversationMap.get(sourceID);
+      if (!conversation) return;
+
+      const currentConversation =
+        changes.get(conversation.conversationID) ?? conversation;
+      const nextConversation = preserveNewerConversationLatest(currentConversation, {
+        ...currentConversation,
+        latestMsg: JSON.stringify(message),
+        latestMsgSendTime: message.sendTime,
+      });
+      if (
+        nextConversation.latestMsg === currentConversation.latestMsg &&
+        nextConversation.latestMsgSendTime === currentConversation.latestMsgSendTime
+      ) {
+        return;
+      }
+      changes.set(conversation.conversationID, nextConversation);
+    });
+
+    if (!changes.size) return;
+
+    if (urgent) {
+      updateConversationList(Array.from(changes.values()), "filter");
+      return;
+    }
+
+    changes.forEach((conversation, conversationID) => {
+      const pendingConversation =
+        pendingConversationChanges.current.get(conversationID);
+      pendingConversationChanges.current.set(
+        conversationID,
+        pendingConversation
+          ? preserveNewerConversationLatest(pendingConversation, conversation)
+          : conversation,
+      );
+    });
+    scheduleConversationChangeFlush();
+  };
+
+  const liveMessageHandler = (event: WSEvent<ExMessageItem | ExMessageItem[]>) => {
+    const messages = normalizeNewMessages(event.data);
+    syncLiveConversationLatest(messages, true);
+    handleNewMessages(messages, true);
+  };
+
+  const bulkMessageHandler = (event: WSEvent<ExMessageItem | ExMessageItem[]>) => {
+    const messages = normalizeNewMessages(event.data);
+    if (!backgroundSyncing.current) syncLiveConversationLatest(messages);
+    handleNewMessages(messages);
+  };
+
+  const handleNewMessages = (messages: ExMessageItem[], isLive = false) => {
+    if (!messages.length) return;
+    messages.forEach(syncCurrentGroupMuteStatus);
+    if (latestConnectState.current?.isSyncing && !isLive) {
+      messages.filter(inCurrentConversation).forEach((message) => {
+        const messageKey = message.clientMsgID || message.serverMsgID;
+        if (messageKey) {
+          pendingSyncCurrentMessages.current.set(messageKey, message);
+        }
+      });
+      if (
+        pendingSyncCurrentMessages.current.size &&
+        !syncCurrentMessageFlushTimer.current
+      ) {
+        syncCurrentMessageFlushTimer.current = setTimeout(
+          flushPendingSyncCurrentMessages,
+          SYNC_CURRENT_MESSAGE_BATCH_MS,
+        );
       }
       return;
     }
-    data.map((message) => handleNewMessage(message));
+    if (messages.length === 1) {
+      handleNewMessage(messages[0]);
+      return;
+    }
+    const currentMessages: ExMessageItem[] = [];
+    messages.forEach((message) => {
+      if (inCurrentConversation(message)) {
+        currentMessages.push(message);
+        return;
+      }
+      handleNewMessage(message);
+    });
+    handleCurrentMessagesBatch(currentMessages);
   };
 
   const revokedMessageHandler = ({ data }: WSEvent<RevokedInfo>) => {
@@ -375,7 +710,7 @@ export function useGlobalEvent() {
   };
 
   const newMessageNotify = async (newServerMsg: ExMessageItem) => {
-    if (latestConnectState.current.isSyncing) {
+    if (latestConnectState.current?.isSyncing) {
       return;
     }
 
@@ -433,7 +768,7 @@ export function useGlobalEvent() {
       audioEl = document.createElement("audio");
     }
     audioEl.src = messageRing;
-    audioEl.play();
+    void audioEl.play().catch(() => undefined);
   };
 
   const { run: checkOnline } = useThrottleFn(() => emitter.emit("ONLINE_STATE_CHECK"), {
@@ -449,6 +784,44 @@ export function useGlobalEvent() {
   });
 
   const notPushType = [MessageType.TypingMessage, MessageType.RevokeMessage];
+
+  const handleCurrentMessagesBatch = (messages: ExMessageItem[]) => {
+    const visibleMessages = messages.filter(inCurrentConversation);
+    if (!visibleMessages.length) return;
+
+    if (visibleMessages.some((message) => message.sessionType === SessionType.Single)) {
+      if (
+        visibleMessages.some(
+          (message) => message.contentType === MessageType.TypingMessage,
+        )
+      ) {
+        checkTyping();
+      }
+      checkOnline();
+    }
+
+    const pushableMessages = visibleMessages.filter(
+      (message) => !notPushType.includes(message.contentType),
+    );
+    if (!pushableMessages.length) return;
+
+    const selfUserID = useUserStore.getState().selfInfo.userID;
+    const preparedMessages = pushableMessages.map((message) => ({
+      ...message,
+      isAppend:
+        message.sendID !== selfUserID ||
+        SystemMessageTypes.includes(message.contentType),
+    }));
+    if (useMessageStore.getState().jumpClientMsgID) {
+      preparedMessages.forEach((message) => {
+        if (message.isAppend) emitter.emit("ADD_NEW_MESSAGE_COUNT");
+      });
+      return;
+    }
+
+    pushNewMessages(preparedMessages);
+    emitter.emit("CHAT_LIST_SCROLL_TO_BOTTOM", false);
+  };
 
   const handleNewMessage = (newServerMsg: ExMessageItem) => {
     if (!inCurrentConversation(newServerMsg)) {
@@ -481,7 +854,6 @@ export function useGlobalEvent() {
       }
       newServerMsg.isAppend = needAppend;
       pushNewMessage(newServerMsg);
-      tryAddPreviewImg([newServerMsg]);
       emitter.emit("CHAT_LIST_SCROLL_TO_BOTTOM", false);
     }
   };
@@ -513,20 +885,169 @@ export function useGlobalEvent() {
   };
 
   // conversation
+  const flushPendingConversationChanges = () => {
+    if (conversationChangeFlushTimer.current) {
+      clearTimeout(conversationChangeFlushTimer.current);
+      conversationChangeFlushTimer.current = undefined;
+    }
+    if (conversationChangeIdleCallback.current !== undefined) {
+      window.cancelIdleCallback(conversationChangeIdleCallback.current);
+      conversationChangeIdleCallback.current = undefined;
+    }
+    if (pendingConversationChanges.current.size === 0) return false;
+
+    const conversationList = useConversationStore.getState().conversationList;
+    const changes = Array.from(pendingConversationChanges.current.values());
+    const changeIndexMap = new Map(
+      changes.map((conversation, index) => [conversation.conversationID, index]),
+    );
+    conversationList.forEach((currentConversation) => {
+      const changeIndex = changeIndexMap.get(currentConversation.conversationID);
+      if (changeIndex === undefined) return;
+      changes[changeIndex] = preserveNewerConversationLatest(
+        currentConversation,
+        changes[changeIndex],
+      );
+    });
+    pendingConversationChanges.current.clear();
+    updateConversationList(changes, backgroundSyncing.current ? "preserve" : "filter");
+    return true;
+  };
+
+  const scheduleConversationChangeFlush = () => {
+    if (
+      conversationChangeFlushTimer.current ||
+      conversationChangeIdleCallback.current !== undefined
+    ) {
+      return;
+    }
+
+    conversationChangeFlushTimer.current = setTimeout(
+      () => {
+        conversationChangeFlushTimer.current = undefined;
+        if (
+          backgroundSyncing.current &&
+          typeof window.requestIdleCallback === "function"
+        ) {
+          conversationChangeIdleCallback.current = window.requestIdleCallback(
+            () => {
+              conversationChangeIdleCallback.current = undefined;
+              flushPendingConversationChanges();
+            },
+            { timeout: CONVERSATION_FLUSH_IDLE_TIMEOUT_MS },
+          );
+          return;
+        }
+        flushPendingConversationChanges();
+      },
+      backgroundSyncing.current
+        ? SYNC_CONVERSATION_EVENT_BATCH_MS
+        : CONVERSATION_EVENT_BATCH_MS,
+    );
+  };
+
+  const processPendingConversationEvents = () => {
+    conversationEventProcessTimer.current = undefined;
+    const startedAt = performance.now();
+    let processedCount = 0;
+    const eventBatches = pendingConversationEventBatches.current;
+
+    while (eventBatches.length) {
+      const batch = eventBatches[0];
+      while (batch.index < batch.data.length) {
+        const conversation = batch.data[batch.index++];
+        processedCount += 1;
+        const pendingConversation = pendingConversationChanges.current.get(
+          conversation.conversationID,
+        );
+        pendingConversationChanges.current.set(
+          conversation.conversationID,
+          pendingConversation
+            ? preserveNewerConversationLatest(pendingConversation, conversation)
+            : conversation,
+        );
+        if (
+          processedCount >= CONVERSATION_EVENT_CHUNK_SIZE ||
+          performance.now() - startedAt >= CONVERSATION_EVENT_CHUNK_BUDGET_MS
+        ) {
+          break;
+        }
+      }
+      if (batch.index >= batch.data.length) {
+        eventBatches.shift();
+      }
+      if (
+        processedCount >= CONVERSATION_EVENT_CHUNK_SIZE ||
+        performance.now() - startedAt >= CONVERSATION_EVENT_CHUNK_BUDGET_MS
+      ) {
+        break;
+      }
+    }
+
+    if (pendingConversationChanges.current.size) {
+      scheduleConversationChangeFlush();
+    }
+    if (eventBatches.length) {
+      scheduleConversationEventProcessing();
+      return;
+    }
+
+    const terminalHandler = pendingConversationTerminalHandler.current;
+    if (terminalHandler) {
+      pendingConversationTerminalHandler.current = undefined;
+      terminalHandler();
+    }
+  };
+
+  const scheduleConversationEventProcessing = () => {
+    if (
+      conversationEventProcessTimer.current ||
+      !pendingConversationEventBatches.current.length
+    ) {
+      return;
+    }
+    conversationEventProcessTimer.current = setTimeout(
+      processPendingConversationEvents,
+      latestConnectState.current?.isSyncing ? 16 : 0,
+    );
+  };
+
+  const scheduleConversationChanges = (conversations: ConversationItem[]) => {
+    if (!conversations.length) return;
+    pendingConversationEventBatches.current.push({
+      data: conversations,
+      index: 0,
+    });
+    scheduleConversationEventProcessing();
+  };
+
   const conversationChnageHandler = ({ data }: WSEvent<ConversationItem[]>) => {
-    updateConversationList(data, "filter");
+    scheduleConversationChanges(data);
   };
   const newConversationHandler = ({ data }: WSEvent<ConversationItem[]>) => {
-    updateConversationList(data, "push");
+    scheduleConversationChanges(data);
   };
   const totalUnreadChangeHandler = ({ data }: WSEvent<number>) => {
     updateUnReadCount(data);
-    if (!latestConnectState.current.isSyncing) {
+    if (!latestConnectState.current?.isSyncing) {
       window.electronAPI?.ipcInvoke("updateUnreadCount", data);
     }
   };
 
   // friend
+  const flushPendingAddedFriends = () => {
+    friendAddedFlushTimer.current = undefined;
+    if (!pendingAddedFriends.current.size) return;
+    const friendMap = new Map(
+      useContactStore.getState().friendList.map((friend) => [friend.userID, friend]),
+    );
+    pendingAddedFriends.current.forEach((friend, userID) => {
+      friendMap.set(userID, friend);
+    });
+    pendingAddedFriends.current.clear();
+    setFriendList(Array.from(friendMap.values()));
+  };
+
   const friednInfoChangeHandler = ({ data }: WSEvent<FriendUserItem>) => {
     if (data.userID === useConversationStore.getState().currentConversation?.userID) {
       updateMessageNicknameAndFaceUrl({
@@ -535,12 +1056,19 @@ export function useGlobalEvent() {
         senderFaceUrl: data.faceURL,
       });
     }
+    if (pendingAddedFriends.current.has(data.userID)) {
+      pendingAddedFriends.current.set(data.userID, data);
+    }
     updateFriend(data);
   };
   const friednAddedHandler = ({ data }: WSEvent<FriendUserItem>) => {
-    pushNewFriend(data);
+    pendingAddedFriends.current.set(data.userID, data);
+    if (!friendAddedFlushTimer.current) {
+      friendAddedFlushTimer.current = setTimeout(flushPendingAddedFriends, 500);
+    }
   };
   const friednDeletedHandler = ({ data }: WSEvent<FriendUserItem>) => {
+    pendingAddedFriends.current.delete(data.userID);
     updateFriend(data, true);
   };
 
@@ -648,8 +1176,9 @@ export function useGlobalEvent() {
     IMSDK.off(CbEvents.OnSyncServerFinish, syncFinishHandler);
     IMSDK.off(CbEvents.OnSyncServerFailed, syncFailedHandler);
     // message
-    IMSDK.off(CbEvents.OnRecvNewMessage, newMessageHandler);
-    IMSDK.off(CbEvents.OnRecvNewMessages, newMessageHandler);
+    IMSDK.off(CbEvents.OnRecvNewMessage, liveMessageHandler);
+    IMSDK.off(CbEvents.OnRecvNewMessages, bulkMessageHandler);
+    IMSDK.off(CbEvents.OnNewRecvMessageRevoked, revokedMessageHandler);
     // conversation
     IMSDK.off(CbEvents.OnConversationChanged, conversationChnageHandler);
     IMSDK.off(CbEvents.OnNewConversation, newConversationHandler);

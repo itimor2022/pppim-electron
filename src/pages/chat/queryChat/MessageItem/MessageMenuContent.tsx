@@ -252,6 +252,7 @@ const MessageMenuContent = ({
   };
 
   const tryRevoke = async () => {
+    if (!messageCanRevoke) return;
     try {
       await IMSDK.revokeMessage({ conversationID, clientMsgID: message.clientMsgID });
       updateOneMessage({
@@ -314,6 +315,8 @@ const MessageMenuContent = ({
   const moreThanRevokeLimit =
     message.sendTime < Date.now() - revokeLimitMinutes * 60 * 1000;
   const messageIsSuccess = message.status === MessageStatus.Succeed;
+  const messageCanRevoke =
+    messageIsSuccess && message.seq > 0 && Boolean(message.clientMsgID);
 
   return (
     <div className="p-1">
@@ -334,6 +337,8 @@ const MessageMenuContent = ({
         }
 
         if (menu.idx === 5) {
+          if (!messageCanRevoke) return null;
+
           if (moreThanRevokeLimit && isNomal) return null;
 
           if (!isSender && !isGroupSession(message.sessionType)) return null;

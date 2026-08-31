@@ -1,6 +1,5 @@
-import { useLatest, useMount } from "ahooks";
+import { useLatest } from "ahooks";
 import { MessageType } from "open-im-sdk-wasm";
-import { ConversationItem } from "open-im-sdk-wasm/lib/types/entity";
 import { useCallback, useEffect, useState } from "react";
 
 import { IMSDK } from "@/layout/MainContentWrap";
@@ -61,36 +60,27 @@ export function useMessageFileDownloadState(
   const latestCurrentTask = useLatest(currentTask);
   const latestMessage = useLatest(message);
 
-  useMount(() => {
-    checkIsDownload();
-  });
-
   useEffect(() => {
-    if (currentTask?.downloadState === "finish") {
-      checkIsDownload();
-    }
-  }, [currentTask?.downloadState]);
-
-  const checkIsDownload = async () => {
-    const { data } = await IMSDK.findMessageList([
-      {
-        conversationID:
-          useConversationStore.getState().currentConversation?.conversationID ?? "",
-        clientMsgIDList: [latestMessage.current.clientMsgID],
-      },
-    ]);
-    const message = data.findResultItems?.[0].messageList[0];
-    if (!message) return;
-
-    const { path } = getSourceData(message);
-    if (window.electronAPI?.fileExists(path)) {
-      setPreviewPath(path);
+    const currentMessage = latestMessage.current;
+    const currentSourcePath = getSourceData(currentMessage).path;
+    if (
+      currentMessage.localEx &&
+      window.electronAPI?.fileExists(currentMessage.localEx)
+    ) {
+      setPreviewPath(currentMessage.localEx);
       return;
     }
-    if (message.localEx && window.electronAPI?.fileExists(message.localEx)) {
-      setPreviewPath(message.localEx);
+    if (currentSourcePath && window.electronAPI?.fileExists(currentSourcePath)) {
+      setPreviewPath(currentSourcePath);
+      return;
     }
-  };
+    setPreviewPath(undefined);
+  }, [
+    currentTask?.downloadState,
+    latestMessage,
+    message.localEx,
+    getSourceData(message).path,
+  ]);
 
   const tryDownload = useCallback(async () => {
     if (latestPreviewPath.current) {
@@ -148,6 +138,5 @@ export function useMessageFileDownloadState(
     progress: currentTask?.progress ?? 0,
     downloadState: previewPath ? "finish" : currentTask?.downloadState ?? "cancel",
     tryDownload,
-    checkIsDownload,
   };
 }

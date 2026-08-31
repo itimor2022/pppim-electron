@@ -1,10 +1,9 @@
 import { Avatar as AntdAvatar, AvatarProps } from "antd";
 import clsx from "clsx";
 import * as React from "react";
-import { useMemo } from "react";
 
 import default_group from "@/assets/images/contact/my_groups.png";
-import { useMessageStore, useUserStore } from "@/store";
+import { useUserStore } from "@/store";
 import { avatarList, getDefaultAvatar } from "@/utils/avatar";
 import { downloadFile } from "@/utils/common";
 
@@ -19,7 +18,7 @@ interface IOIMAvatarProps extends AvatarProps {
   size?: number;
 }
 
-const OIMAvatar: React.FC<IOIMAvatarProps> = (props) => {
+const OIMAvatar = React.forwardRef<HTMLSpanElement, IOIMAvatarProps>((props, ref) => {
   const {
     src,
     text,
@@ -27,38 +26,46 @@ const OIMAvatar: React.FC<IOIMAvatarProps> = (props) => {
     color = "#fff",
     bgColor = "#2074de",
     isgroup = false,
-    isnotification,
+    className,
+    style,
+    ...avatarProps
   } = props;
+  delete avatarProps.isnotification;
   const [errorHolder, setErrorHolder] = React.useState<string>();
+  const sourceURL = typeof src === "string" ? src : undefined;
+  const cachePath = useUserStore((state) =>
+    sourceURL ? state.imageCache[sourceURL] : undefined,
+  );
+  const [avatarSource, setAvatarSource] = React.useState<AvatarProps["src"]>(
+    src || (isgroup ? default_group : undefined),
+  );
 
-  const getAvatarUrl = useMemo(() => {
-    if (src) {
-      if (default_avatars.includes(src as string))
-        return getDefaultAvatar(src as string);
-
-      if (!window.electronAPI) return src;
-
-      const cachePath = useUserStore.getState().imageCache[src as string];
-      if (cachePath && window.electronAPI?.fileExists(cachePath)) {
-        return `file://${cachePath}`;
-      }
-      const hasTask =
-        Object.values(useMessageStore.getState().downloadMap).findIndex(
-          (task) => task.originUrl === src,
-        ) > -1;
-      if (!hasTask) {
-        downloadFile(src as string, {
-          isThumb: true,
-          saveType: "avatar",
-        });
-      }
-
-      return src;
+  React.useEffect(() => {
+    if (!sourceURL) {
+      setAvatarSource(src || (isgroup ? default_group : undefined));
+      return;
     }
-    return isgroup ? default_group : undefined;
-  }, [src, isgroup, isnotification]);
+    if (default_avatars.includes(sourceURL)) {
+      setAvatarSource(getDefaultAvatar(sourceURL));
+      return;
+    }
+    if (!window.electronAPI) {
+      setAvatarSource(src);
+      return;
+    }
+    if (cachePath && window.electronAPI.fileExists(cachePath)) {
+      setAvatarSource(`file://${cachePath}`);
+      return;
+    }
 
-  const avatarProps = { ...props, isgroup: undefined, isnotification: undefined };
+    setAvatarSource(src);
+    if (/^https?:\/\//.test(sourceURL)) {
+      void downloadFile(sourceURL, {
+        isThumb: true,
+        saveType: "avatar",
+      });
+    }
+  }, [cachePath, isgroup, sourceURL, src]);
 
   React.useEffect(() => {
     if (!isgroup) {
@@ -70,31 +77,36 @@ const OIMAvatar: React.FC<IOIMAvatarProps> = (props) => {
     if (isgroup) {
       setErrorHolder(default_group);
     }
+    return true;
   };
 
   return (
     <AntdAvatar
+      ref={ref}
+      shape="square"
+      {...avatarProps}
       style={{
         backgroundColor: bgColor,
         minWidth: `${size}px`,
         minHeight: `${size}px`,
         lineHeight: `${size - 2}px`,
         color,
+        ...style,
       }}
-      shape="square"
-      {...avatarProps}
       className={clsx(
         {
-          "cursor-pointer": Boolean(props.onClick),
+          "cursor-pointer": Boolean(avatarProps.onClick),
         },
-        props.className,
+        className,
       )}
-      src={errorHolder ?? getAvatarUrl}
-      onError={errorHandler as any}
+      src={errorHolder ?? avatarSource}
+      onError={errorHandler}
     >
       {text}
     </AntdAvatar>
   );
-};
+});
+
+OIMAvatar.displayName = "OIMAvatar";
 
 export default OIMAvatar;

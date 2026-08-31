@@ -7,7 +7,6 @@ import {
   GroupItem,
   GroupMemberItem,
   MessageItem,
-  SelfUserInfo,
 } from "open-im-sdk-wasm/lib/types/entity";
 
 import { BusinessUserInfo } from "@/api/login";
@@ -60,7 +59,7 @@ export interface AppSettings {
 
 export type LocaleString = "zh-CN" | "en-US";
 
-export type ConversationListUpdateType = "push" | "filter";
+export type ConversationListUpdateType = "push" | "filter" | "preserve";
 
 export type RevokeMessageData = {
   quoteMessage?: MessageItem;
@@ -69,6 +68,7 @@ export type RevokeMessageData = {
 
 export interface ConversationStore {
   conversationList: ConversationItem[];
+  isSyncing: boolean;
   currentConversation?: ConversationItem;
   unReadCount: number;
   currentGroupInfo?: GroupItem;
@@ -81,12 +81,14 @@ export interface ConversationStore {
     list: ConversationItem[],
     type: ConversationListUpdateType,
   ) => void;
+  updateSyncing: (isSyncing: boolean) => void;
   delConversationByCID: (conversationID: string) => void;
   // getCurrentConversationByReq: (conversationID?: string) => Promise<void>;
   updateCurrentConversation: (
     conversation?: ConversationItem,
     isJump?: boolean,
   ) => void;
+  markConversationAsReadByReq: (conversation: ConversationItem) => Promise<void>;
   getUnReadCountByReq: () => Promise<number>;
   updateUnReadCount: (count: number) => void;
   getCurrentGroupInfoByReq: (groupID: string) => Promise<void>;
@@ -135,6 +137,9 @@ export interface MessageStore {
   jumpLoading: boolean;
   jumpClientMsgID?: string;
   lastMinSeq: number;
+  historyStartClientMsgID: string;
+  laterLastMinSeq: number;
+  laterStartClientMsgID: string;
   hasMore: boolean;
   laterHasMore: boolean;
   isCheckMode: boolean;
@@ -145,7 +150,9 @@ export interface MessageStore {
   clearAppendState: () => void;
   updateJumpClientMsgID: (clientMsgID?: string) => void;
   pushNewMessage: (message: ExMessageItem) => void;
+  pushNewMessages: (messages: ExMessageItem[]) => void;
   updateOneMessage: (message: ExMessageItem, fromImageDownload?: boolean) => void;
+  updateMessages: (messages: ExMessageItem[], fromImageDownload?: boolean) => void;
   updateMessageNicknameAndFaceUrl: (params: UpdateMessaggeBaseInfoParams) => void;
   deleteAndPushOneMessage: (message: ExMessageItem) => void;
   deleteOneMessage: (clientMsgID: string) => void;

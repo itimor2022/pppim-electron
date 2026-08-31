@@ -28,8 +28,13 @@ export function useDropDomOnly({
 
   useDrop(domRef, {
     onDom: ({ message }: { message: ExMessageItem }, e) => {
-      const conversationName =
-        useConversationStore.getState().currentConversation?.showName;
+      const targetConversation =
+        useConversationStore.getState().currentConversation;
+      if (!targetConversation) {
+        e?.preventDefault();
+        return;
+      }
+      const conversationName = targetConversation.showName;
       const { fileName, fileSize } = getFileData(message);
       modal.confirm({
         title: `${t("placeholder.sendTo")}${conversationName}`,
@@ -56,6 +61,8 @@ export function useDropDomOnly({
           const newMessage = (await IMSDK.createForwardMessage(message)).data;
           sendMessage({
             message: newMessage,
+            recvID: targetConversation.userID,
+            groupID: targetConversation.groupID,
           });
         },
       });

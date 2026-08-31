@@ -12,6 +12,9 @@ export type PermissionField = "applyMemberFriend" | "lookMemberInfo";
 
 export function useGroupSettings({ closeOverlay }: { closeOverlay: () => void }) {
   const currentGroupInfo = useConversationStore((state) => state.currentGroupInfo);
+  const updateCurrentGroupInfo = useConversationStore(
+    (state) => state.updateCurrentGroupInfo,
+  );
   const selfUserID = useUserStore((state) => state.selfInfo.userID);
 
   const updateGroupInfo = useCallback(
@@ -64,12 +67,17 @@ export function useGroupSettings({ closeOverlay }: { closeOverlay: () => void })
   const updateGroupMuteAll = useCallback(async () => {
     if (!currentGroupInfo) return;
     const currentIsMute = currentGroupInfo.status === GroupStatus.Muted;
+    const nextStatus = currentIsMute ? GroupStatus.Nomal : GroupStatus.Muted;
     const execFunc = async () => {
       try {
         await IMSDK.changeGroupMute({
           groupID: currentGroupInfo.groupID,
           isMute: !currentIsMute,
         });
+        const latestGroupInfo = useConversationStore.getState().currentGroupInfo;
+        if (latestGroupInfo === currentGroupInfo) {
+          updateCurrentGroupInfo({ ...latestGroupInfo, status: nextStatus });
+        }
       } catch (error) {
         feedbackToast({ error });
       }
@@ -90,7 +98,7 @@ export function useGroupSettings({ closeOverlay }: { closeOverlay: () => void })
     } else {
       await execFunc();
     }
-  }, [currentGroupInfo?.status, currentGroupInfo?.groupID]);
+  }, [currentGroupInfo?.status, currentGroupInfo?.groupID, updateCurrentGroupInfo]);
 
   const updateGroupMemberPermission = useCallback(
     async (rule: AllowType, field: PermissionField) => {
@@ -101,11 +109,15 @@ export function useGroupSettings({ closeOverlay }: { closeOverlay: () => void })
           groupID: currentGroupInfo.groupID,
           [field]: rule,
         });
+        updateCurrentGroupInfo({
+          ...currentGroupInfo,
+          [field]: rule,
+        });
       } catch (error) {
         feedbackToast({ error });
       }
     },
-    [],
+    [currentGroupInfo, updateCurrentGroupInfo],
   );
 
   const tryDismissGroup = () => {

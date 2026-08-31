@@ -16,7 +16,7 @@ import image from "@/assets/images/chatFooter/image.png";
 import rtc from "@/assets/images/chatFooter/rtc.png";
 import video from "@/assets/images/chatFooter/video.png";
 import { insertAtCursor } from "@/components/EditableDiv";
-import { ExMessageItem } from "@/store";
+import { ExMessageItem, useConversationStore } from "@/store";
 import { base64toFile } from "@/utils/common";
 import emitter from "@/utils/events";
 
@@ -159,9 +159,14 @@ const SendActionBar = ({
       antdMessage.warning(t("empty.fileContentEmpty"));
       return;
     }
+    const targetConversation =
+      useConversationStore.getState().currentConversation;
+    if (!targetConversation) return;
     const message = await createFileMessage(fileEl);
     sendMessage({
       message,
+      recvID: targetConversation.userID,
+      groupID: targetConversation.groupID,
     });
   };
 

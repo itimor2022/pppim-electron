@@ -1,10 +1,11 @@
-import { useRequest, useThrottleFn } from "ahooks";
+import { useThrottleFn } from "ahooks";
 import { GroupAtType, GroupStatus } from "open-im-sdk-wasm";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import { useCurrentMemberRole } from "@/hooks/useCurrentMemberRole";
 import { IMSDK } from "@/layout/MainContentWrap";
 import { useConversationStore } from "@/store";
+import { scheduleIMSDKRequest } from "@/utils/imSdkRequestScheduler";
 
 export default function useConversationState() {
   const currentConversation = useConversationStore(
@@ -16,14 +17,14 @@ export default function useConversationState() {
   const currentMemberInGroupLoading = useConversationStore(
     (state) => state.currentMemberInGroupLoading,
   );
+  const markConversationAsReadByReq = useConversationStore(
+    (state) => state.markConversationAsReadByReq,
+  );
 
   const { isJoinGroup, isNomal, currentIsMuted } = useCurrentMemberRole();
 
   useEffect(() => {
     checkConversationState();
-    return () => {
-      checkConversationState();
-    };
   }, [
     currentConversation?.conversationID,
     currentConversation?.groupAtType,
@@ -35,13 +36,18 @@ export default function useConversationState() {
       if (!currentConversation) return;
 
       if (currentConversation.unreadCount > 0) {
-        IMSDK.markConversationMessageAsRead(currentConversation.conversationID);
+        void markConversationAsReadByReq(currentConversation).catch((error) => {
+          console.error("mark conversation as read failed", error);
+        });
       }
       if (
         currentConversation.groupAtType !== GroupAtType.AtNormal &&
         currentConversation.groupAtType !== GroupAtType.AtGroupNotice
       ) {
-        IMSDK.resetConversationGroupAtType(currentConversation.conversationID);
+        void scheduleIMSDKRequest(
+          () => IMSDK.resetConversationGroupAtType(currentConversation.conversationID),
+          { priority: "normal" },
+        ).catch(() => undefined);
       }
     },
     { wait: 2000 },

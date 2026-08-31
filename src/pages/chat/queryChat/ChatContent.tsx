@@ -10,7 +10,7 @@ import { useParams } from "react-router-dom";
 import { SystemMessageTypes } from "@/constants/im";
 import { OverlayVisibleHandle } from "@/hooks/useOverlayVisible";
 import MergePreviewModal from "@/pages/common/MergePreviewModal";
-import { useMessageStore, useUserStore } from "@/store";
+import { useConversationStore, useMessageStore, useUserStore } from "@/store";
 import emitter from "@/utils/events";
 
 import ForwardMediaPreview from "./MediaPreview";
@@ -18,6 +18,8 @@ import MessageItem from "./MessageItem";
 import NotificationMessage from "./NotificationMessage";
 import SystemNotification from "./SystemNotification";
 import UnreadMessageSlider, { UnreadMessageSliderHandle } from "./UnreadMessageSlider";
+
+const HISTORY_PAGE_RETRY_DELAYS_MS = [0, 750, 2_000];
 
 const ChatContent = ({ isNotificationSession }: { isNotificationSession: boolean }) => {
   const { conversationID } = useParams();
@@ -27,6 +29,7 @@ const ChatContent = ({ isNotificationSession }: { isNotificationSession: boolean
   const mergePreviewRef = useRef<OverlayVisibleHandle>(null);
   const mediaPreviewRef = useRef<{ showAlbum: (clientMsgID: string) => void }>(null);
   const unreadSliderRef = useRef<UnreadMessageSliderHandle>(null);
+  const historyPageLoading = useRef(false);
 
   const selfUserID = useUserStore((state) => state.selfInfo.userID);
   const jumpClientMsgID = useMessageStore((state) => state.jumpClientMsgID);
@@ -43,7 +46,7 @@ const ChatContent = ({ isNotificationSession }: { isNotificationSession: boolean
 
   const {
     loading,
-    run: getMoreMessages,
+    runAsync: getMoreMessages,
     cancel,
   } = useRequest(getHistoryMessageList, {
     manual: true,
@@ -86,9 +89,10 @@ const ChatContent = ({ isNotificationSession }: { isNotificationSession: boolean
       const mutation = mutationsList[0];
       if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
         setTimeout(() => {
-          const el = document.getElementById(
-            `chat_${latestMessageList.current[1].clientMsgID}`,
-          );
+          const anchorMessage =
+            latestMessageList.current[1] ?? latestMessageList.current[0];
+          if (!anchorMessage) return;
+          const el = document.getElementById(`chat_${anchorMessage.clientMsgID}`);
           el?.scrollIntoView({
             block: "end",
           });
@@ -138,9 +142,40 @@ const ChatContent = ({ isNotificationSession }: { isNotificationSession: boolean
     [unreadSliderRef],
   );
 
-  const loadMoreMessage = () => {
-    if ((lockScroll && jumpClientMsgID) || loading || !hasMoreMessage) return;
-    getMoreMessages(true);
+  const loadMoreMessage = async () => {
+    if (
+      (lockScroll && jumpClientMsgID) ||
+      loading ||
+      historyPageLoading.current ||
+      !hasMoreMessage
+    )
+      return;
+
+    historyPageLoading.current = true;
+    const beforeCount = useMessageStore.getState().historyMessageList.length;
+    try {
+      for (const retryDelay of HISTORY_PAGE_RETRY_DELAYS_MS) {
+        if (retryDelay) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        }
+        if (
+          useConversationStore.getState().currentConversation?.conversationID !==
+          conversationID
+        ) {
+          return;
+        }
+        await getMoreMessages(true).catch(() => false);
+        const currentState = useMessageStore.getState();
+        if (
+          !currentState.hasMore ||
+          currentState.historyMessageList.length > beforeCount
+        ) {
+          break;
+        }
+      }
+    } finally {
+      historyPageLoading.current = false;
+    }
   };
 
   const prevLoad = () => {
@@ -172,7 +207,7 @@ const ChatContent = ({ isNotificationSession }: { isNotificationSession: boolean
           dataLength={messageList.length}
           lockTrigger={lockScroll}
           prev={prevLoad}
-          next={loadMoreMessage}
+          next={() => void loadMoreMessage()}
           className={clsx("flex w-full flex-col-reverse", {
             "!flex-col": isNotificationSession,
           })}

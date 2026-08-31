@@ -23,6 +23,7 @@ import { IMSDK } from "@/layout/MainContentWrap";
 import {
   ExMessageItem,
   getImageMessageSourceUrl,
+  useConversationStore,
   useMessageStore,
   useUserStore,
 } from "@/store";
@@ -30,6 +31,7 @@ import { PreviewGroupItem } from "@/store/type";
 import FileDownloadIcon from "@/svg/FileDownloadIcon";
 import { downloadFile, feedbackToast, getDownloadTask } from "@/utils/common";
 import emitter from "@/utils/events";
+import { scheduleIMSDKRequest } from "@/utils/imSdkRequestScheduler";
 
 const MediaMessagePane = ({
   isVideo,
@@ -50,6 +52,9 @@ const MediaMessagePane = ({
     previewItems: [] as PreviewGroupItem[],
   });
   const latestLoadState = useLatest(loadState);
+  const searchGeneration = useRef(0);
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
 
   const galleryRef = useRef<{
     setAlbumCurrent: (current: number) => void;
@@ -58,15 +63,17 @@ const MediaMessagePane = ({
 
   useEffect(() => {
     const downloadSuccessHandler = (url: string, filePath: string) => {
-      const { isMediaMessage, clientMsgID } =
-        useMessageStore.getState().downloadMap[url];
+      const task = useMessageStore.getState().downloadMap[url];
+      if (!task) return;
+      const { isMediaMessage, clientMsgID } = task;
 
       const messageKeyList = ["weekMessage", "monthMessage", "earlierMessage"] as const;
 
       const handleIndex = (key: (typeof messageKeyList)[number]) => {
-        const index = latestLoadState.current[key].findIndex(
-          (message) => message.clientMsgID === clientMsgID,
-        );
+        const index =
+          latestLoadState.current?.[key].findIndex(
+            (message) => message.clientMsgID === clientMsgID,
+          ) ?? -1;
         if (index > -1) {
           setLoadState((state) => {
             const tmpMessage = [...state[key]];
@@ -83,7 +90,7 @@ const MediaMessagePane = ({
 
       if (!isMediaMessage) return;
 
-      const tmpPreviewList = [...latestLoadState.current.previewItems];
+      const tmpPreviewList = [...(latestLoadState.current?.previewItems ?? [])];
       const idx = tmpPreviewList.findIndex((item) => item.clientMsgID === clientMsgID);
       if (idx >= 0) {
         tmpPreviewList[idx].url = `file://${filePath}`;
@@ -105,57 +112,83 @@ const MediaMessagePane = ({
   }, []);
 
   useEffect(() => {
-    return () => {
-      setLoadState((state) => ({
-        ...state,
-        weekMessage: [],
-        monthMessage: [],
-        earlierMessage: [],
-        previewItems: [],
-      }));
-    };
+    searchGeneration.current += 1;
+    setLoadState({
+      loading: false,
+      hasMore: true,
+      pageIndex: 1,
+      weekMessage: [],
+      monthMessage: [],
+      earlierMessage: [],
+      previewItems: [],
+    });
   }, [conversationID]);
 
   useEffect(() => {
     if (isActive) {
-      loadMore(true);
+      void loadMore(true);
+    } else {
+      searchGeneration.current += 1;
     }
   }, [isActive]);
 
-  const loadMore = (clear = false) => {
-    if ((!loadState.hasMore && !clear) || loadState.loading || !conversationID) return;
+  const loadMore = async (clear = false) => {
+    if (
+      (!loadState.hasMore && !clear) ||
+      (loadState.loading && !clear) ||
+      !conversationID ||
+      !isActiveRef.current
+    )
+      return;
+    const generation = clear ? ++searchGeneration.current : searchGeneration.current;
+    const requestPageIndex = clear ? 1 : loadState.pageIndex;
     setLoadState((state) => ({
       ...state,
       loading: true,
-      pageIndex: clear ? 1 : state.pageIndex,
+      pageIndex: requestPageIndex,
     }));
 
-    IMSDK.searchLocalMessages({
-      conversationID,
-      keywordList: [],
-      keywordListMatchType: 0,
-      senderUserIDList: [],
-      messageTypeList: [
-        !isVideo ? MessageType.PictureMessage : MessageType.VideoMessage,
-      ],
-      searchTimePosition: 0,
-      searchTimePeriod: 0,
-      pageIndex: clear ? 1 : loadState.pageIndex,
-      count: 20,
-    })
-      .then(({ data }) => {
-        const searchData: ExMessageItem[] = data.searchResultItems
-          ? data.searchResultItems[0].messageList
-          : [];
-        const weekMessage: ExMessageItem[] = !clear ? [...loadState.weekMessage] : [];
-        const monthMessage: ExMessageItem[] = !clear ? [...loadState.monthMessage] : [];
-        const earlierMessage: ExMessageItem[] = !clear
-          ? [...loadState.earlierMessage]
-          : [];
-        const previewItems: PreviewGroupItem[] = !clear
-          ? [...loadState.previewItems]
-          : [];
-        searchData.map((message) => {
+    try {
+      const response = await scheduleIMSDKRequest(
+        () =>
+          IMSDK.searchLocalMessages({
+            conversationID,
+            keywordList: [],
+            keywordListMatchType: 0,
+            senderUserIDList: [],
+            messageTypeList: [
+              !isVideo ? MessageType.PictureMessage : MessageType.VideoMessage,
+            ],
+            searchTimePosition: 0,
+            searchTimePeriod: 0,
+            pageIndex: requestPageIndex,
+            count: 20,
+          }),
+        {
+          priority: "low",
+          isValid: () =>
+            generation === searchGeneration.current &&
+            isActiveRef.current &&
+            useConversationStore.getState().currentConversation?.conversationID ===
+              conversationID,
+        },
+      );
+      if (
+        !response ||
+        generation !== searchGeneration.current ||
+        !isActiveRef.current ||
+        useConversationStore.getState().currentConversation?.conversationID !==
+          conversationID
+      )
+        return;
+      const searchData: ExMessageItem[] =
+        response.data.searchResultItems?.[0]?.messageList ?? [];
+      setLoadState((state) => {
+        const weekMessage = clear ? [] : [...state.weekMessage];
+        const monthMessage = clear ? [] : [...state.monthMessage];
+        const earlierMessage = clear ? [] : [...state.earlierMessage];
+        const previewItems = clear ? [] : [...state.previewItems];
+        searchData.forEach((message) => {
           const time = message.sendTime;
           if (isThisWeek(time)) {
             weekMessage.push(message);
@@ -172,24 +205,39 @@ const MediaMessagePane = ({
             });
           }
         });
-
-        setLoadState((state) => ({
+        const seenClientMsgIDs = new Set<string>();
+        const messages = [...weekMessage, ...monthMessage, ...earlierMessage].filter(
+          (message) => {
+            if (seenClientMsgIDs.has(message.clientMsgID)) return false;
+            seenClientMsgIDs.add(message.clientMsgID);
+            return true;
+          },
+        );
+        const previewItemMap = new Map(
+          previewItems.map((item) => [item.clientMsgID, item]),
+        );
+        return {
           loading: false,
-          pageIndex: state.pageIndex + 1,
+          pageIndex: requestPageIndex + 1,
           hasMore: searchData.length === 20,
-          weekMessage,
-          monthMessage,
-          earlierMessage,
-          previewItems,
-        }));
-      })
-      .catch((error) => {
-        setLoadState((state) => ({
-          ...state,
-          loading: false,
-        }));
-        feedbackToast({ error, msg: t("toast.getMessageListFailed") });
+          weekMessage: messages.filter((message) => isThisWeek(message.sendTime)),
+          monthMessage: messages.filter(
+            (message) => !isThisWeek(message.sendTime) && isThisMonth(message.sendTime),
+          ),
+          earlierMessage: messages.filter(
+            (message) =>
+              !isThisWeek(message.sendTime) && !isThisMonth(message.sendTime),
+          ),
+          previewItems: messages
+            .map((message) => previewItemMap.get(message.clientMsgID))
+            .filter((item): item is PreviewGroupItem => Boolean(item)),
+        };
       });
+    } catch (error) {
+      if (generation !== searchGeneration.current) return;
+      setLoadState((state) => ({ ...state, loading: false }));
+      feedbackToast({ error, msg: t("toast.getMessageListFailed") });
+    }
   };
 
   const showAlbum = useCallback(

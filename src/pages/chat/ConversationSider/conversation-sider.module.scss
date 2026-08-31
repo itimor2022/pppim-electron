@@ -1,0 +1,52 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.list {
+  min-height: 0;
+  flex: 1;
+}
+
+.syncStatus {
+  padding: 4px 16px 8px;
+  flex: 0 0 auto;
+}
+
+.syncStatusText {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  gap: 6px;
+
+  :global(.anticon) {
+    color: var(--primary);
+  }
+}
+
+.syncProgress {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--primary-active);
+}
+
+.syncProgressBar {
+  width: 36%;
+  height: 100%;
+  border-radius: inherit;
+  animation: conversation-sync-progress 1.2s ease-in-out infinite;
+  background: var(--primary);
+}
+
+@keyframes conversation-sync-progress {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(310%);
+  }
+}

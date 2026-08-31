@@ -84,6 +84,8 @@ export function useDropAndPaste({
               const message = await createFileMessage(file);
               sendMessage({
                 message: message,
+                recvID: currentConversation?.userID,
+                groupID: currentConversation?.groupID,
               });
             });
           },

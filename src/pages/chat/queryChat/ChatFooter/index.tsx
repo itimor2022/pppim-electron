@@ -15,7 +15,7 @@ import EditableDiv, {
 import { parseTwemoji } from "@/components/Twemoji";
 import { IMSDK } from "@/layout/MainContentWrap";
 import { ExMessageItem, useConversationStore } from "@/store";
-import { getExtraStr } from "@/utils/common";
+import { feedbackToast, getExtraStr } from "@/utils/common";
 import emitter from "@/utils/events";
 import { formatMessageByType } from "@/utils/imCommon";
 
@@ -29,8 +29,28 @@ import { useFileMessage } from "./SendActionBar/useFileMessage";
 import { useDropDomOnly } from "./useDropDomOnly";
 import { useSendMessage } from "./useSendMessage";
 
+const SEND_PREPARATION_TIMEOUT_MS = 8_000;
+
+const withSendPreparationTimeout = <T,>(task: Promise<T>) =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error("消息发送准备超时，请重试"));
+    }, SEND_PREPARATION_TIMEOUT_MS);
+    task.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+
 const ChatFooter = () => {
   const [html, setHtml] = useState("");
+  const [isPreparing, setIsPreparing] = useState(false);
   const [atPanelState, setAtPanelState] = useState({
     visible: false,
     originStr: "",
@@ -51,6 +71,7 @@ const ChatFooter = () => {
   useDropDomOnly({ domRef: editableDivRef.current?.el, sendMessage });
 
   const drft = useRef("");
+  const sendPreparing = useRef(false);
 
   useEffect(() => {
     window.editRevoke = (clientMsgID: string) => {
@@ -78,6 +99,14 @@ const ChatFooter = () => {
     checkSavedDraft(oldDraftText);
     return () => {
       if (!editableDivRef.current?.el.current) return;
+      const latestConversation = useConversationStore.getState().currentConversation;
+      if (
+        !drft.current &&
+        latestConversation?.conversationID === conversationID &&
+        !latestConversation.draftText
+      ) {
+        return;
+      }
       checkDraftSave(drft.current, oldDraftText);
     };
   }, [conversationID]);
@@ -99,9 +128,22 @@ const ChatFooter = () => {
           const file = item.getAsFile();
           if (!file) continue;
 
+          const targetConversation =
+            useConversationStore.getState().currentConversation;
+          if (
+            !targetConversation ||
+            targetConversation.conversationID !== conversationID
+          ) {
+            return;
+          }
+
           // 直接调用 createFileMessage + sendMessage 发送，无需插入 DOM
           const message = await createFileMessage(file);
-          sendMessage({ message });
+          sendMessage({
+            message,
+            recvID: targetConversation.userID,
+            groupID: targetConversation.groupID,
+          });
           
            // ↓ 新增这两行：清空输入框残留内容
           setHtml("");
@@ -264,21 +306,22 @@ const ChatFooter = () => {
     }
   };
 
-  const getImageEl = () => {
+  const getImageMessages = async () => {
     const editableDiv = editableDivRef.current?.el.current;
-    if (!editableDiv) return;
+    if (!editableDiv) return [] as ExMessageItem[];
 
     const imageEls = [
       ...editableDiv.querySelectorAll(".image-el"),
     ] as HTMLImageElement[];
-    imageEls.map(async (el) => {
+    const messages: ExMessageItem[] = [];
+    for (const [index, el] of imageEls.entries()) {
       const blob = await fetch(el.src).then((res) => res.blob());
-      const file = new File([blob], `screenshot${Date.now()}.png`, { type: blob.type });
-      const message = await createFileMessage(file);
-      sendMessage({
-        message,
+      const file = new File([blob], `screenshot${Date.now()}-${index}.png`, {
+        type: blob.type,
       });
-    });
+      messages.push(await createFileMessage(file));
+    }
+    return messages;
   };
 
   const getAtList = () => {
@@ -318,13 +361,10 @@ const ChatFooter = () => {
     return html.replace(regWithoutHtmlExceptImg, "");
   };
 
-  const getTextMessage = async (cleanText: string) => {
+  const getTextMessage = async (cleanText: string, groupID?: string) => {
     const atEls = getAtList();
 
-    if (
-      useConversationStore.getState().currentConversation?.groupID &&
-      atEls.length > 0
-    ) {
+    if (groupID && atEls.length > 0) {
       let formatAtText = latestHtml.current;
       atEls.map(
         (el) => (formatAtText = formatAtText.replace(el.tag, `@${el.userID} `)),
@@ -354,16 +394,79 @@ const ChatFooter = () => {
   };
 
   const enterToSend = async () => {
-    const cleanText = getCleanText(latestHtml.current);
-    getImageEl();
-    const message = await getTextMessage(cleanText);
-    setHtml("");
-    drft.current = "";
-    if (!cleanText.trim()) return;
+    if (sendPreparing.current) return;
+    const sourceConversation = useConversationStore.getState().currentConversation;
+    if (
+      !conversationID ||
+      !sourceConversation ||
+      sourceConversation.conversationID !== conversationID
+    ) {
+      console.warn("blocked message send for mismatched conversation", {
+        routeConversationID: conversationID,
+        currentConversationID: sourceConversation?.conversationID,
+      });
+      return;
+    }
+    const sourceHTML = latestHtml.current ?? "";
+    const cleanText = getCleanText(sourceHTML);
+    const hasText = Boolean(cleanText.trim());
+    const hasImage = Boolean(
+      editableDivRef.current?.el.current?.querySelector(".image-el"),
+    );
+    if (!hasText && !hasImage) return;
 
-    sendMessage({ message });
-    if (latestQuoteMessage.current) {
-      updateQuoteMessage();
+    sendPreparing.current = true;
+    const restoreComposer = () => {
+      if (
+        (latestHtml.current ?? "") === sourceHTML ||
+        !(latestHtml.current ?? "").trim()
+      ) {
+        setHtml(sourceHTML);
+        drft.current = sourceHTML;
+      }
+    };
+    setIsPreparing(true);
+    try {
+      const messages = await withSendPreparationTimeout(
+        (async () => {
+          const preparedMessages = await getImageMessages();
+          if (hasText) {
+            preparedMessages.push(
+              await getTextMessage(cleanText, sourceConversation.groupID),
+            );
+          }
+          return preparedMessages;
+        })(),
+      );
+      if (!messages.length) return;
+      if (
+        useConversationStore.getState().currentConversation?.conversationID !==
+        sourceConversation.conversationID
+      ) {
+        return;
+      }
+
+      if ((latestHtml.current ?? "") === sourceHTML) {
+        setHtml("");
+        drft.current = "";
+      }
+
+      if (hasText && latestQuoteMessage.current) {
+        updateQuoteMessage();
+      }
+      for (const message of messages) {
+        void sendMessage({
+          message,
+          recvID: sourceConversation.userID,
+          groupID: sourceConversation.groupID,
+        });
+      }
+    } catch (error) {
+      restoreComposer();
+      feedbackToast({ error });
+    } finally {
+      sendPreparing.current = false;
+      setIsPreparing(false);
     }
   };
 
@@ -451,7 +554,12 @@ const ChatFooter = () => {
               <span className="mr-2.5 text-xs text-[var(--sub-text)]">
                 {t("placeholder.sendShortcutkey")}
               </span>
-              <Button className="px-6 py-1" type="primary" onClick={debounceSend}>
+              <Button
+                className="px-6 py-1"
+                type="primary"
+                loading={isPreparing}
+                onClick={debounceSend}
+              >
                 {t("placeholder.send")}
               </Button>
             </div>

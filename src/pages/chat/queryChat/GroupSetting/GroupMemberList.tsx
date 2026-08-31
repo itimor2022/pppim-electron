@@ -60,7 +60,7 @@ const GroupMemberList: ForwardRefRenderFunction<
     return () => {
       resetState();
     };
-  }, [currentMemberInGroup?.groupID]);
+  }, [currentMemberInGroup?.groupID, getMemberData, resetState]);
 
   useImperativeHandle(ref, () => ({
     searchMember,
@@ -108,7 +108,10 @@ const GroupMemberList: ForwardRefRenderFunction<
           data={dataSource}
           endReached={endReached}
           components={{
-            Header: () => (fetchState.loading ? <div>loading...</div> : null),
+            Header: () =>
+              (isSearching ? fetchState.searchLoading : fetchState.loading) ? (
+                <div>loading...</div>
+              ) : null,
           }}
           itemContent={(_, member) => (
             <MemberItem

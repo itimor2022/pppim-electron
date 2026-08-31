@@ -4,7 +4,6 @@ import "./i18n/index";
 import log from "electron-log/renderer";
 import ReactDOM from "react-dom/client";
 
-import App from "./App";
 import { isSaveLog } from "./config";
 
 if (window.electronAPI && isSaveLog) {
@@ -15,6 +14,18 @@ if (window.electronAPI && isSaveLog) {
   console.error = rendererLogger.error.bind(rendererLogger);
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<App />);
+const OPENIM_SDK_SERVICE_QUERY = "openimSdkService";
 
-postMessage({ payload: "removeLoading" }, "*");
+const bootstrap = async () => {
+  const searchParams = new URLSearchParams(window.location.search);
+  if (searchParams.get(OPENIM_SDK_SERVICE_QUERY) === "1") {
+    await import("./utils/imSdkService");
+    return;
+  }
+
+  const { default: App } = await import("./App");
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<App />);
+  postMessage({ payload: "removeLoading" }, "*");
+};
+
+void bootstrap();

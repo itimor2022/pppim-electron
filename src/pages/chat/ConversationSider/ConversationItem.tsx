@@ -7,7 +7,7 @@ import type {
   ConversationItem as ConversationItemType,
   MessageItem,
 } from "open-im-sdk-wasm/lib/types/entity";
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import disturb from "@/assets/images/disturb.png";
@@ -28,8 +28,9 @@ const ConversationItem = ({ conversation }: IConversationProps) => {
   const navigate = useNavigate();
   const conversationItemRef = useRef<HTMLDivElement>(null);
   const [showConversationMenu, setShowConversationMenu] = useState(false);
-  const conversationID = useConversationStore(
-    (state) => state.currentConversation?.conversationID,
+  const isCurrentConversation = useConversationStore(
+    (state) =>
+      state.currentConversation?.conversationID === conversation.conversationID,
   );
   const updateCurrentConversation = useConversationStore(
     (state) => state.updateCurrentConversation,
@@ -50,7 +51,7 @@ const ConversationItem = ({ conversation }: IConversationProps) => {
   };
 
   const getMessagePrefix = () => {
-    if (conversation.draftText && conversationID !== conversation.conversationID) {
+    if (conversation.draftText && !isCurrentConversation) {
       return t("messageDescription.drftPrefix");
     }
     let prefix = "";
@@ -82,7 +83,7 @@ const ConversationItem = ({ conversation }: IConversationProps) => {
   const atReminder = conversation.groupAtType !== GroupAtType.AtNormal;
   const isNotification = conversation.conversationType === SessionType.Notification;
   const getLatestMessageContent = () => {
-    if (conversation.draftText && conversationID !== conversation.conversationID) {
+    if (conversation.draftText && !isCurrentConversation) {
       const parser = new DOMParser();
       const doc = parser.parseFromString(conversation.draftText, "text/html");
       const atEls = doc.querySelectorAll("b.at-el");
@@ -115,8 +116,7 @@ const ConversationItem = ({ conversation }: IConversationProps) => {
 
   const latestMessageTime = formatConversionTime(conversation.latestMsgSendTime);
 
-  const isActive =
-    conversationID === conversation.conversationID || conversation.isPinned;
+  const isActive = isCurrentConversation || conversation.isPinned;
   const notNomalReceive = conversation.recvMsgOpt !== MessageReceiveOptType.Nomal;
 
   return (
@@ -146,7 +146,12 @@ const ConversationItem = ({ conversation }: IConversationProps) => {
         )}
         onClick={toSpecifiedConversation}
       >
-        <Badge size="small" count={notNomalReceive ? 0 : conversation.unreadCount}>
+        <Badge
+          size="small"
+          count={
+            notNomalReceive || isCurrentConversation ? 0 : conversation.unreadCount
+          }
+        >
           <OIMAvatar
             src={conversation.faceURL}
             isgroup={Boolean(conversation.groupID)}
@@ -193,4 +198,4 @@ const ConversationItem = ({ conversation }: IConversationProps) => {
   );
 };
 
-export default ConversationItem;
+export default memo(ConversationItem);

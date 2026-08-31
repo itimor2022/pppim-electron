@@ -17,9 +17,8 @@ const FileMessageRenderer: FC<IMessageItemProps> = ({ message }) => {
 
   const { progress, downloadState, tryDownload } = useMessageFileDownloadState(message);
 
-  const uploadProgress = useMessageUploadProgress(message.clientMsgID);
-
   const isSending = message.status === MessageStatus.Sending;
+  const uploadProgress = useMessageUploadProgress(message.clientMsgID, isSending);
   const isSucceed = message.status === MessageStatus.Succeed;
 
   // useDrag({ message }, dragRef, {

@@ -32,10 +32,11 @@ const JumpToMessageWrap: ForwardRefRenderFunction<
   const { toSpecifiedConversation } = useConversationToggle();
 
   const jumpToHistory = async () => {
-    await getTwoWayHistoryMessage({
+    const loaded = await getTwoWayHistoryMessage({
       conversationID,
       message,
     });
+    if (loaded !== true) return;
     const sourceID =
       message.groupID ||
       (message.sendID === useUserStore.getState().selfInfo.userID

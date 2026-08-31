@@ -8,9 +8,10 @@ import JumpToMessageWrap from "@/components/JumpToMessageWrap";
 import OIMAvatar from "@/components/OIMAvatar";
 import { canSearchMessageTypes } from "@/constants";
 import { IMSDK } from "@/layout/MainContentWrap";
-import { ExMessageItem } from "@/store";
+import { ExMessageItem, useConversationStore } from "@/store";
 import { feedbackToast } from "@/utils/common";
 import { formatMessageTime } from "@/utils/imCommon";
+import { scheduleIMSDKRequest } from "@/utils/imSdkRequestScheduler";
 
 import { IMessageItemProps } from "../MessageItem";
 import CardMessageRenderer from "../MessageItem/CardMessageRenderer";
@@ -41,57 +42,90 @@ const NomalMessagePane = ({
 }) => {
   const loadMoreKeyword = useRef("");
   const inputRef = useRef<{ clear: () => void }>(null);
+  const searchGeneration = useRef(0);
+  const isOverlayOpenRef = useRef(isOverlayOpen);
+  isOverlayOpenRef.current = isOverlayOpen;
   const [loadState, setLoadState] = useState({ ...initialData });
 
   useEffect(() => {
-    return () => {
-      if (!isOverlayOpen) {
-        setLoadState({ ...initialData });
-        inputRef.current?.clear();
-      }
-    };
-  }, [conversationID, isOverlayOpen]);
+    searchGeneration.current += 1;
+    setLoadState({ ...initialData });
+    inputRef.current?.clear();
+  }, [conversationID]);
 
-  const triggerSearch = (keyword: string, loadMore = false) => {
+  useEffect(() => {
+    if (isOverlayOpen) return;
+    searchGeneration.current += 1;
+    setLoadState({ ...initialData });
+    inputRef.current?.clear();
+  }, [isOverlayOpen]);
+
+  const triggerSearch = async (keyword: string, loadMore = false) => {
+    const normalizedKeyword = keyword.trim();
+    if (!normalizedKeyword) {
+      searchGeneration.current += 1;
+      loadMoreKeyword.current = "";
+      setLoadState({ ...initialData });
+      return;
+    }
     if (
       (!loadState.hasMore && loadMore) ||
-      loadState.loading ||
+      (loadState.loading && loadMore) ||
       !conversationID ||
-      !keyword
+      !isOverlayOpen
     )
       return;
-    setLoadState((state) => ({ ...state, loading: true }));
+    const generation = loadMore ? searchGeneration.current : ++searchGeneration.current;
+    const requestPageIndex = loadMore ? loadState.pageIndex : 1;
+    loadMoreKeyword.current = normalizedKeyword;
+    setLoadState((state) =>
+      loadMore ? { ...state, loading: true } : { ...initialData, loading: true },
+    );
 
-    IMSDK.searchLocalMessages({
-      conversationID,
-      keywordList: [keyword],
-      keywordListMatchType: 0,
-      senderUserIDList: [],
-      messageTypeList: canSearchMessageTypes,
-      searchTimePosition: 0,
-      searchTimePeriod: 0,
-      pageIndex: !loadMore ? 1 : loadState.pageIndex,
-      count: 20,
-    })
-      .then(({ data }) => {
-        const searchData: ExMessageItem[] = data.searchResultItems
-          ? data.searchResultItems[0].messageList
-          : [];
-        setLoadState((state) => ({
-          loading: false,
-          pageIndex: state.pageIndex + 1,
-          hasMore: searchData.length === 20,
-          messageList: [...(!loadMore ? [] : state.messageList), ...searchData],
-        }));
-      })
-      .catch((error) => {
-        setLoadState((state) => ({
-          ...state,
-          loading: false,
-        }));
-        feedbackToast({ error, msg: t("toast.getMessageListFailed") });
-      });
-    loadMoreKeyword.current = keyword;
+    try {
+      const response = await scheduleIMSDKRequest(
+        () =>
+          IMSDK.searchLocalMessages({
+            conversationID,
+            keywordList: [normalizedKeyword],
+            keywordListMatchType: 0,
+            senderUserIDList: [],
+            messageTypeList: canSearchMessageTypes,
+            searchTimePosition: 0,
+            searchTimePeriod: 0,
+            pageIndex: requestPageIndex,
+            count: 20,
+          }),
+        {
+          priority: "low",
+          isValid: () =>
+            generation === searchGeneration.current &&
+            isOverlayOpenRef.current &&
+            useConversationStore.getState().currentConversation?.conversationID ===
+              conversationID,
+        },
+      );
+      if (
+        !response ||
+        generation !== searchGeneration.current ||
+        !isOverlayOpenRef.current ||
+        useConversationStore.getState().currentConversation?.conversationID !==
+          conversationID
+      )
+        return;
+      const searchData: ExMessageItem[] =
+        response.data.searchResultItems?.[0]?.messageList ?? [];
+      setLoadState((state) => ({
+        loading: false,
+        pageIndex: requestPageIndex + 1,
+        hasMore: searchData.length === 20,
+        messageList: [...(!loadMore ? [] : state.messageList), ...searchData],
+      }));
+    } catch (error) {
+      if (generation !== searchGeneration.current) return;
+      setLoadState((state) => ({ ...state, loading: false }));
+      feedbackToast({ error, msg: t("toast.getMessageListFailed") });
+    }
   };
 
   return (

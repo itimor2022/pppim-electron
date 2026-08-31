@@ -146,7 +146,13 @@ const RegisterForm = ({ loginMethod, setFormType }: RegisterFormProps) => {
           name="invitationCode"
           rules={
             needInvitationCode
-              ? [{ required: true, message: t("toast.inputInvitationCode") }]
+              ? [
+                  {
+                    required: true,
+                    whitespace: true,
+                    message: t("toast.inputInvitationCode"),
+                  },
+                ]
               : undefined
           }
           hidden={registerForm !== 0}
