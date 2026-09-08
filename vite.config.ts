@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import electron from "vite-electron-plugin";
 import { customStart, loadViteEnv } from "vite-electron-plugin/plugin";
 import pkg from "./package.json";
+import legacy from "@vitejs/plugin-legacy";
 // import visualizer from "rollup-plugin-visualizer";
 
 // https://vitejs.dev/config/
@@ -15,9 +16,6 @@ export default defineConfig(({ command }) => {
 
   return {
     base: "./",
-    worker: {
-      format: "es",
-    },
     resolve: {
       alias: {
         "@": path.join(__dirname, "src"),
@@ -45,6 +43,9 @@ export default defineConfig(({ command }) => {
           loadViteEnv(),
         ],
       }),
+      legacy({
+        targets: ["defaults", "not IE 11"],
+      }),
       // visualizer({ open: true }),
     ],
     server: !!process.env.VSCODE_DEBUG
@@ -57,7 +58,11 @@ export default defineConfig(({ command }) => {
         })()
       : undefined,
     clearScreen: false,
+    worker: {
+      format: "es",
+    },
     build: {
+      minify: "terser",
       sourcemap: false,
       cssCodeSplit: true,
       chunkSizeWarningLimit: 500,

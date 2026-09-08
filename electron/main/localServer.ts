@@ -5,7 +5,10 @@ import type { Server } from "http";
 let server: Server | null = null;
 let serverPort = 0;
 
-export function startLocalServer(distPath: string): Promise<number> {
+export function startLocalServer(
+  distPath: string,
+  extraResourcesPath: string,
+): Promise<number> {
   return new Promise((resolve, reject) => {
     if (server) {
       resolve(serverPort);
@@ -13,6 +16,15 @@ export function startLocalServer(distPath: string): Promise<number> {
     }
 
     const app = express();
+
+    app.use(
+      "/twemoji",
+      express.static(join(extraResourcesPath, "twemoji"), {
+        setHeaders: (res) => {
+          res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+        },
+      }),
+    );
     
     // 请求日志
     app.use((req, res, next) => {

@@ -10,6 +10,19 @@ interface SearchObjectType {
   "random-prefix"?: string;
 }
 
+type StartDownloadInput =
+  | string
+  | {
+      url: string;
+      saveType?: string;
+      randomPrefix?: string;
+    };
+
+type RequestedDownloadOptions = {
+  saveType?: string;
+  randomPrefix?: string;
+};
+
 const customTypes = ["image", "video", "avatar"];
 const getFileType = (type?: string) => {
   if (customTypes.includes(type)) return type;
@@ -20,6 +33,8 @@ const getRealUrl = (item: Electron.DownloadItem) => item.getURLChain()[0];
 
 export const initDownloadManage = (webContents: Electron.WebContents) => {
   const downloadItems = [] as Electron.DownloadItem[];
+  const requestedDownloads = new Map<string, RequestedDownloadOptions>();
+  const cancelledDownloadURLs = new Set<string>();
 
   const webContentsSend = (channel: string, ...args: any[]) => {
     if (webContents.isDestroyed()) return;
@@ -27,8 +42,23 @@ export const initDownloadManage = (webContents: Electron.WebContents) => {
   };
 
   webContents.session.on("will-download", (_, item) => {
+    const urlChain = item.getURLChain();
+    const cancelledURL = urlChain.find((url) => cancelledDownloadURLs.has(url));
+    if (cancelledURL) {
+      cancelledDownloadURLs.delete(cancelledURL);
+      requestedDownloads.delete(cancelledURL);
+      item.cancel();
+      return;
+    }
+
     downloadItems.push(item);
     const realUrl = getRealUrl(item);
+    const requestedURL = urlChain.find((url) => requestedDownloads.has(url));
+    const requestedOptions = requestedURL
+      ? requestedDownloads.get(requestedURL)
+      : undefined;
+    if (requestedURL) requestedDownloads.delete(requestedURL);
+    const eventURL = requestedURL ?? realUrl;
     const searchParams = new URL(realUrl).searchParams;
     const searchObject = {} as SearchObjectType;
 
@@ -42,8 +72,11 @@ export const initDownloadManage = (webContents: Electron.WebContents) => {
         path.join(global.pathConfig.autoUpdateCachePath, item.getFilename()),
       );
     } else {
-      const fileType = getFileType(searchObject["save-type"]);
-      const fileNamePrefix = searchObject["random-prefix"] ?? "";
+      const fileType = getFileType(
+        requestedOptions?.saveType ?? searchObject["save-type"],
+      );
+      const fileNamePrefix =
+        requestedOptions?.randomPrefix ?? searchObject["random-prefix"] ?? "";
       let savePath = path.join(
         global.pathConfig[`${fileType}CachePath`],
         `${fileNamePrefix}${item.getFilename()}`,
@@ -55,7 +88,7 @@ export const initDownloadManage = (webContents: Electron.WebContents) => {
       if (state === "interrupted") {
         webContentsSend(
           IpcMainToRender[isUpdate ? "updateDownloadPaused" : "downloadPaused"],
-          realUrl,
+          eventURL,
         );
       } else if (state === "progressing") {
         if (!item.isPaused()) {
@@ -64,7 +97,7 @@ export const initDownloadManage = (webContents: Electron.WebContents) => {
           const progress = Math.round((receivedBytes / totalBytes) * 100);
           webContentsSend(
             IpcMainToRender[isUpdate ? "uploadDownloadProgress" : "downloadProgress"],
-            realUrl,
+            eventURL,
             progress,
           );
           if (isUpdate) setProgressBar(progress);
@@ -79,7 +112,7 @@ export const initDownloadManage = (webContents: Electron.WebContents) => {
         IpcMainToRender[isUpdate ? "updateDownloadFailed" : "downloadFailed"];
       webContentsSend(
         state === "completed" ? successEvent : failedEvent,
-        realUrl,
+        eventURL,
         item.getSavePath(),
       );
       if (isUpdate) setProgressBar(-1);
@@ -92,26 +125,38 @@ export const initDownloadManage = (webContents: Electron.WebContents) => {
   });
 
   // ipcMain
-  ipcMain.handle(IpcRenderToMain.startDownload, (_, url: string) => {
-    webContents.session.downloadURL(url);
+  ipcMain.handle(IpcRenderToMain.startDownload, (_, input: StartDownloadInput) => {
+    const url = typeof input === "string" ? input : input.url;
+    if (typeof input !== "string") {
+      requestedDownloads.set(url, {
+        saveType: input.saveType,
+        randomPrefix: input.randomPrefix,
+      });
+    }
+    try {
+      webContents.session.downloadURL(url);
+    } catch (error) {
+      requestedDownloads.delete(url);
+      throw error;
+    }
   });
 
   ipcMain.handle(IpcRenderToMain.pauseDownload, (_, url: string) => {
-    const item = downloadItems.find((item) => getRealUrl(item) === url);
+    const item = downloadItems.find((item) => item.getURLChain().includes(url));
     if (item && !item.isPaused()) {
       item.pause();
     }
   });
 
   ipcMain.handle(IpcRenderToMain.resumeDownload, (_, url: string) => {
-    const item = downloadItems.find((item) => getRealUrl(item) === url);
+    const item = downloadItems.find((item) => item.getURLChain().includes(url));
     if (item && item.isPaused()) {
       item.resume();
     }
   });
 
   ipcMain.handle(IpcRenderToMain.cancelDownload, (_, url: string) => {
-    const item = downloadItems.find((item) => getRealUrl(item) === url);
+    const item = downloadItems.find((item) => item.getURLChain().includes(url));
     if (item) {
       item.cancel();
       const itemIndex = downloadItems.indexOf(item);
@@ -119,6 +164,10 @@ export const initDownloadManage = (webContents: Electron.WebContents) => {
         downloadItems.splice(itemIndex, 1);
         cleanupTemporaryFile(item.getSavePath());
       }
+      return;
+    }
+    if (requestedDownloads.delete(url)) {
+      cancelledDownloadURLs.add(url);
     }
   });
 
@@ -127,6 +176,8 @@ export const initDownloadManage = (webContents: Electron.WebContents) => {
       item.cancel();
       cleanupTemporaryFile(item.getSavePath());
     });
+    requestedDownloads.clear();
+    cancelledDownloadURLs.clear();
   };
 };
 

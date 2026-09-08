@@ -1,4 +1,4 @@
-export {};
+import { installGroupMemberRequestScheduler } from "./groupMemberRequestScheduler";
 
 type WorkerSDKConfig = {
   coreWasmPath: string;
@@ -44,6 +44,7 @@ const serializeError = (error: unknown) => {
 };
 
 const initializeSDK = async (config: WorkerSDKConfig) => {
+  installGroupMemberRequestScheduler();
   await import(
     /* @vite-ignore */ new URL(config.wasmExecPath, self.location.href).href
   );

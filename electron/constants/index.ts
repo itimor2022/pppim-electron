@@ -15,6 +15,7 @@ export const IpcMainToRender = {
   downloadPaused: "downloadPaused",
   downloadProgress: "downloadProgress",
   captureResponse: "captureResponse",
+  pauseVoiceMessage: "pauseVoiceMessage",
 };
 
 export const IpcRenderToMain = {

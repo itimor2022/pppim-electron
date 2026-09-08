@@ -9,10 +9,14 @@ import { maxInstanceCount, singleInstanceLock } from "../config";
 import { initDownloadManage } from "./downloadManage";
 import { registerShortcuts, unregisterShortcuts } from "./shortcutManage";
 import { startLocalServer, stopLocalServer } from "./localServer";
+import { IpcMainToRender } from "../constants";
 
 const url = process.env.VITE_DEV_SERVER_URL;
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
+let imSdkServiceWindow: BrowserWindow | null = null;
+let currentPartition = "";
+const OPENIM_SDK_SERVICE_QUERY = "openimSdkService";
 
 const store = getStore();
 
@@ -30,8 +34,50 @@ function createSplashWindow() {
   });
 }
 
+const destroyIMSDKServiceWindow = () => {
+  if (!imSdkServiceWindow || imSdkServiceWindow.isDestroyed()) {
+    imSdkServiceWindow = null;
+    return;
+  }
+  imSdkServiceWindow.destroy();
+  imSdkServiceWindow = null;
+};
+
+const createIMSDKServiceWindow = (baseUrl?: string) => {
+  destroyIMSDKServiceWindow();
+  imSdkServiceWindow = new BrowserWindow({
+    show: false,
+    skipTaskbar: true,
+    focusable: false,
+    webPreferences: {
+      preload: global.pathConfig.preload,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false,
+      partition: currentPartition,
+      webSecurity: false,
+      backgroundThrottling: false,
+    },
+  });
+  imSdkServiceWindow.webContents.setAudioMuted(true);
+  imSdkServiceWindow.on("closed", () => {
+    imSdkServiceWindow = null;
+  });
+
+  if (baseUrl) {
+    imSdkServiceWindow.loadURL(
+      `${baseUrl.replace(/\/$/, "")}/?${OPENIM_SDK_SERVICE_QUERY}=1`,
+    );
+    return;
+  }
+  imSdkServiceWindow.loadFile(global.pathConfig.indexHtml, {
+    query: { [OPENIM_SDK_SERVICE_QUERY]: "1" },
+  });
+};
+
 export function createMainWindow() {
   createSplashWindow();
+  currentPartition = getNextPartition();
   mainWindow = new BrowserWindow({
     title: "OpenIM",
     icon: join(global.pathConfig.publicPath, "favicon.ico"),
@@ -49,7 +95,7 @@ export function createMainWindow() {
       contextIsolation: true,
       sandbox: false,
       devTools: true,
-      partition: getNextPartition(),
+      partition: currentPartition,
       webSecurity: false,
     },
   });
@@ -58,6 +104,7 @@ export function createMainWindow() {
 
   if (process.env.VITE_DEV_SERVER_URL) {
     // 开发环境：使用 Vite 服务器
+    createIMSDKServiceWindow(url);
     mainWindow.loadURL(url);
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
@@ -65,10 +112,11 @@ export function createMainWindow() {
     const distPath = global.pathConfig.distPath;
     console.log("[Main] Starting local server, distPath:", distPath);
     
-    startLocalServer(distPath)
+    startLocalServer(distPath, global.pathConfig.extraResourcesPath)
       .then((port) => {
         const localUrl = `http://127.0.0.1:${port}`;
         console.log(`[Main] Loading from local server: ${localUrl}`);
+        createIMSDKServiceWindow(localUrl);
         mainWindow.loadURL(localUrl);
       })
       .catch((err) => {
@@ -80,6 +128,7 @@ export function createMainWindow() {
           `本地服务器启动失败:\n${err.message}\n\n将尝试使用 file:// 协议加载`
         );
         // 降级到 file:// 协议
+        createIMSDKServiceWindow();
         mainWindow.loadFile(global.pathConfig.indexHtml);
       });
   }
@@ -104,12 +153,20 @@ export function createMainWindow() {
     unregisterShortcuts();
   });
 
+  const pauseVoiceMessage = () => {
+    mainWindow?.webContents.send(IpcMainToRender.pauseVoiceMessage);
+  };
+
+  mainWindow.on("minimize", pauseVoiceMessage);
+  mainWindow.on("hide", pauseVoiceMessage);
+
   mainWindow.on("close", (e) => {
     if (
       getIsForceQuit() ||
       !mainWindow.isVisible() ||
       store.get("closeAction") === "quit"
     ) {
+      destroyIMSDKServiceWindow();
       mainWindow = null;
       destroyTray();
       clearChildWindows();
@@ -148,6 +205,7 @@ export function createChildWindow(
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      partition: currentPartition,
       webSecurity: false,
     },
   });
@@ -318,6 +376,11 @@ export const getCacheSize = async () => {
 export const getWebContents = (): Electron.WebContents => {
   if (!mainWindow) throw new Error("main window is undefined");
   return mainWindow.webContents;
+};
+
+export const getIMSDKServiceWebContents = (): Electron.WebContents | undefined => {
+  if (!imSdkServiceWindow || imSdkServiceWindow.isDestroyed()) return undefined;
+  return imSdkServiceWindow.webContents;
 };
 
 export const getNextPartition = () => {

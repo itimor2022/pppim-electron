@@ -71,23 +71,24 @@ const removeQueuedRequest = (request: QueuedRequest<unknown>) => {
 const runNextRequest = async (lane: IMSDKRequestLane) => {
   if (requestRunning[lane]) return;
 
-  const request = takeNextRequest(lane);
+  let nextRequest = takeNextRequest(lane);
+  while (nextRequest) {
+    if (nextRequest.queueTimeout) {
+      clearTimeout(nextRequest.queueTimeout);
+      nextRequest.queueTimeout = undefined;
+    }
+    if (nextRequest.isValid && !nextRequest.isValid()) {
+      nextRequest.resolve(undefined);
+    } else if (nextRequest.deadlineAt <= Date.now()) {
+      nextRequest.reject(new IMSDKRequestTimeoutError(nextRequest.timeoutMs));
+    } else {
+      break;
+    }
+    nextRequest = takeNextRequest(lane);
+  }
+  const request = nextRequest;
   if (!request) return;
-  if (request.queueTimeout) {
-    clearTimeout(request.queueTimeout);
-    request.queueTimeout = undefined;
-  }
-  if (request.isValid && !request.isValid()) {
-    request.resolve(undefined);
-    void runNextRequest(lane);
-    return;
-  }
   const remainingTimeoutMs = request.deadlineAt - Date.now();
-  if (remainingTimeoutMs <= 0) {
-    request.reject(new IMSDKRequestTimeoutError(request.timeoutMs));
-    void runNextRequest(lane);
-    return;
-  }
 
   requestRunning[lane] = true;
   let requestSettled = false;

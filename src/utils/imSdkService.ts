@@ -2,6 +2,8 @@ import type { CbEvents, getSDK } from "open-im-sdk-wasm";
 import type { WSEvent } from "open-im-sdk-wasm/lib/types/entity";
 import type { WasmPathConfig } from "open-im-sdk-wasm/lib/types/params";
 
+import { installGroupMemberRequestScheduler } from "./groupMemberRequestScheduler";
+
 type OpenIMSDK = ReturnType<typeof getSDK>;
 type ServiceSDKConfig = Required<WasmPathConfig> & { wasmExecPath: string };
 
@@ -93,6 +95,7 @@ const emitSDKEvent = (event: CbEvents, data: WSEvent<unknown>) => {
 };
 
 const initializeSDK = async (config: ServiceSDKConfig) => {
+  installGroupMemberRequestScheduler();
   if (typeof Reflect.get(globalThis, "Go") !== "function") {
     await import(
       /* @vite-ignore */ new URL(config.wasmExecPath, window.location.href).href

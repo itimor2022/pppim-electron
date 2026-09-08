@@ -14,6 +14,7 @@ import {
   clearCache,
   closeWindow,
   createChildWindow,
+  getIMSDKServiceWebContents,
   getWebContents,
   hotReload,
   minimize,
@@ -33,6 +34,62 @@ import { changeLanguage } from "../i18n";
 const childWindowMap: { [key: string]: number } = {};
 
 const store = getStore();
+
+const OPENIM_SDK_READY_TIMEOUT_MS = 15_000;
+const OPENIM_SDK_CALL_TIMEOUT_MS = 90_000;
+
+type OpenIMSDKResponse = { ok: true; data: unknown } | { ok: false; error: unknown };
+
+type OpenIMSDKReadyWaiter = {
+  resolve: (webContents: Electron.WebContents) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
+const openIMSDKReadyWaiters = new Set<OpenIMSDKReadyWaiter>();
+const pendingOpenIMSDKCalls = new Map<
+  number,
+  {
+    resolve: (response: OpenIMSDKResponse) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }
+>();
+let openIMSDKServiceReadyID: number | undefined;
+let openIMSDKRequestID = 0;
+
+const serializeIPCError = (error: unknown) => {
+  if (!error || typeof error !== "object") return error;
+  const serialized = Object.fromEntries(Object.entries(error));
+  if (error instanceof Error) {
+    serialized.name = error.name;
+    serialized.message = error.message;
+    serialized.stack = error.stack;
+  }
+  return serialized;
+};
+
+const waitForOpenIMSDKService = () => {
+  const serviceWebContents = getIMSDKServiceWebContents();
+  if (
+    serviceWebContents &&
+    !serviceWebContents.isDestroyed() &&
+    serviceWebContents.id === openIMSDKServiceReadyID
+  ) {
+    return Promise.resolve(serviceWebContents);
+  }
+
+  return new Promise<Electron.WebContents>((resolve, reject) => {
+    const waiter: OpenIMSDKReadyWaiter = {
+      resolve,
+      reject,
+      timeout: setTimeout(() => {
+        openIMSDKReadyWaiters.delete(waiter);
+        reject(new Error("OpenIM SDK service startup timed out"));
+      }, OPENIM_SDK_READY_TIMEOUT_MS),
+    };
+    openIMSDKReadyWaiters.add(waiter);
+  });
+};
 
 export const clearChildWindows = () => {
   for (const key in childWindowMap) {
@@ -69,6 +126,86 @@ export const openChildWindowHandle = (props) => {
 };
 
 export const setIpcMainListener = () => {
+  ipcMain.handle("openim-sdk-service-ready", (event) => {
+    const serviceWebContents = getIMSDKServiceWebContents();
+    if (!serviceWebContents || serviceWebContents.id !== event.sender.id) return false;
+
+    openIMSDKServiceReadyID = event.sender.id;
+    openIMSDKReadyWaiters.forEach((waiter) => {
+      clearTimeout(waiter.timeout);
+      waiter.resolve(serviceWebContents);
+    });
+    openIMSDKReadyWaiters.clear();
+    return true;
+  });
+
+  ipcMain.handle("openim-sdk-init", async (_event, config) => {
+    const serviceWebContents = await waitForOpenIMSDKService();
+    serviceWebContents.send("openim-sdk-service-command", {
+      type: "init",
+      config,
+    });
+    return true;
+  });
+
+  ipcMain.handle("openim-sdk-call", async (_event, request) => {
+    try {
+      const serviceWebContents = await waitForOpenIMSDKService();
+      const requestID = ++openIMSDKRequestID;
+      return await new Promise<OpenIMSDKResponse>((resolve) => {
+        const timeout = setTimeout(() => {
+          pendingOpenIMSDKCalls.delete(requestID);
+          resolve({
+            ok: false,
+            error: {
+              name: "TimeoutError",
+              message: `OpenIM SDK call timed out: ${request?.method ?? "unknown"}`,
+            },
+          });
+        }, OPENIM_SDK_CALL_TIMEOUT_MS);
+        pendingOpenIMSDKCalls.set(requestID, { resolve, timeout });
+        serviceWebContents.send("openim-sdk-service-command", {
+          type: "call",
+          requestID,
+          method: request?.method,
+          args: request?.args ?? [],
+        });
+      });
+    } catch (error) {
+      return { ok: false, error: serializeIPCError(error) } as OpenIMSDKResponse;
+    }
+  });
+
+  ipcMain.handle("openim-sdk-service-result", (event, response) => {
+    if (event.sender.id !== openIMSDKServiceReadyID) return false;
+    const pendingCall = pendingOpenIMSDKCalls.get(response?.requestID);
+    if (!pendingCall) return false;
+
+    pendingOpenIMSDKCalls.delete(response.requestID);
+    clearTimeout(pendingCall.timeout);
+    if (Object.prototype.hasOwnProperty.call(response, "error")) {
+      pendingCall.resolve({ ok: false, error: response.error });
+    } else {
+      pendingCall.resolve({ ok: true, data: response.data });
+    }
+    return true;
+  });
+
+  ipcMain.handle("openim-sdk-service-event", (event, payload) => {
+    if (event.sender.id !== openIMSDKServiceReadyID) return false;
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (
+        window.isDestroyed() ||
+        window.webContents.isDestroyed() ||
+        window.webContents.id === event.sender.id
+      ) {
+        return;
+      }
+      window.webContents.send("openim-sdk-event", payload);
+    });
+    return true;
+  });
+
   ipcMain.handle(IpcRenderToMain.clearSession, () => {
     clearCache();
   });
